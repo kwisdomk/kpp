@@ -6,8 +6,6 @@ Built for the **Zetech Alumni × Student Hackathon**, 12–13 November 2026, und
 
 [Hosted prototype](https://jenga-ai-ebon.vercel.app/) · [Installation](#installation) · [How to use it](#how-to-use-it)
 
-There is also a public [Hawamuriuki/kpp fork](https://github.com/Hawamuriuki/kpp).
-
 **Status:** a prototype with unfinished technical-source retrieval and multimodal evaluation. Company records and the seeded catalogue are synthetic demo data. The assistant supports decisions; it does not replace manufacturer documentation or a qualified engineer.
 
 ## Purpose and users

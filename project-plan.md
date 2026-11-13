@@ -1773,6 +1773,18 @@ are pending. Next: B reviews schema and authorization; A verifies PDF provenance
   hosted service, dependency, security policy or code behavior changed or rerun.
   Source permissions and measured benchmark work remain pending.
 
+### Public documentation links — 13 November 2026
+
+- Fixed four `docs/SECURITY.md` links that GitHub's Security policy page
+  resolved from the repository root rather than the file's directory. Targets
+  now use their full GitHub URLs, including the OCR contract, reconciliation
+  handoff and media policy.
+- Checked 22 repository links and Markdown anchors in `README.md` and the
+  security note against tracked files and headings: all passed. Confirmed the
+  live policy's original rendered URLs and ran `git diff --check` successfully.
+  Documentation only; no application tests rerun, and the corrections require
+  merge before they appear on the public policy page.
+
 ### Suggested coordination checklist per PR
 
 - [ ] I read `AGENTS.md`, master plan and latest relevant contracts.

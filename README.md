@@ -186,6 +186,19 @@ npm run build
 
 The [execution ledger](project-plan.md) and [security note](docs/SECURITY.md) record detailed progress and remaining work.
 
+## Licenses and evaluation
+
+No repository-wide code license file is present. Individual source materials
+have their own terms: the BMS C1 sample retains its CC BY-SA 4.0 notice, while
+rights for the commercial candidate documents remain pending. Public access to
+a document does not establish permission to process, quote or redistribute it.
+See [DATA.md](DATA.md) for source-level records.
+
+The reconciliation handoff records local backend and AI regression tests with
+mocked model/native boundaries. The 60-question benchmark, held-out image
+accuracy, speech WER and adversarial before/after evaluation have not been
+established. See [verification and limits](docs/reconciliation_handoff.md#verification).
+
 ## Repository guide
 
 | Path | Contents |

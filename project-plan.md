@@ -1761,6 +1761,18 @@ are pending. Next: B reviews schema and authorization; A verifies PDF provenance
 - Changed paths: `README.md` and this ledger. No API/schema/ACL/benchmark change
   or blocked upstream contract. Next: team review of public setup instructions.
 
+### Security, licensing and evaluation documentation — 13 November 2026
+
+- Reviewed `docs/SECURITY.md` against merged `main@2675ac9`, current source and
+  recorded reconciliation evidence. Updated stale uncommitted/deployment,
+  frontend, message-history and media-status wording; preserved the 79-test
+  session run as historical and linked the later 162-backend/79-AI checkpoint.
+- Added a short license/evaluation status to `README.md`; the existing hosted
+  prototype link remains unchanged. No repository code license was selected.
+- `git diff --check` and relative link checks passed. No tests, browser, model,
+  hosted service, dependency, security policy or code behavior changed or rerun.
+  Source permissions and measured benchmark work remain pending.
+
 ### Suggested coordination checklist per PR
 
 - [ ] I read `AGENTS.md`, master plan and latest relevant contracts.

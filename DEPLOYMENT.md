@@ -122,3 +122,18 @@ For local backend development, copy `backend/.env.example` to `backend/.env`.
 The backend loads that file when present and does not override environment
 variables provided by the shell or hosting platform. Real `.env` files are
 excluded by `.gitignore`; commit only the `.env.example` templates.
+
+## Troubleshooting 502 responses
+
+Check the backend directly before changing frontend code:
+
+- `/health` returns `{"status":"ok"}` when the API process is reachable.
+- `/ready` returns `{"status":"ready"}` when the API and database are reachable.
+- If either direct backend endpoint returns a Cloudflare 502, inspect the
+  PrimeCloud service's deployment/runtime logs and domain routing. Confirm the
+  service is running the Python `Procfile`, binds to the platform-provided
+  `PORT` on `0.0.0.0`, and uses `/ready` as its health check. A repository change
+  cannot repair an unavailable origin or incorrect PrimeCloud domain mapping.
+- If the backend health endpoints work but the Vercel `/api/v1/health` URL
+  returns the frontend HTML, redeploy Vercel from a branch containing the API
+  rewrite in `vercel.json`.

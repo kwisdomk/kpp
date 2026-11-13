@@ -35,6 +35,8 @@ const ROLE_KEY = "ai-interface-role";
 const SESSION_LENGTH = 7 * 24 * 60 * 60 * 1000;
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_CHAT_ATTACHMENTS = 2;
+const API_RETRY_DELAYS_MS = [300, 900] as const;
+const RETRYABLE_GET_STATUSES = new Set([502, 503, 504]);
 
 type Role = "engineer" | "customer";
 type AttachmentKind = "image" | "audio" | "document";
@@ -131,12 +133,46 @@ async function api<T>(
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
+  const requestOptions = {
     ...options,
     headers,
-  });
+  };
+  const retryableGet = (requestOptions.method ?? "GET").toUpperCase() === "GET";
+  let response: Response;
+  for (let attempt = 0; ; attempt += 1) {
+    requestOptions.signal?.throwIfAborted();
+    try {
+      response = await fetch(`${API_BASE}${path}`, requestOptions);
+    } catch (error) {
+      if (
+        !retryableGet ||
+        attempt >= API_RETRY_DELAYS_MS.length ||
+        !(error instanceof TypeError)
+      ) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, API_RETRY_DELAYS_MS[attempt]));
+      continue;
+    }
+
+    if (
+      !retryableGet ||
+      !RETRYABLE_GET_STATUSES.has(response.status) ||
+      attempt >= API_RETRY_DELAYS_MS.length
+    ) {
+      break;
+    }
+    await response.body?.cancel();
+    await new Promise((resolve) => setTimeout(resolve, API_RETRY_DELAYS_MS[attempt]));
+  }
 
   if (!response.ok) {
+    if (
+      response.status >= 500 &&
+      !response.headers.get("content-type")?.includes("application/json")
+    ) {
+      throw new ApiError(response.status, "The service is temporarily unavailable. Please try again shortly.");
+    }
     const body: unknown = await response.json().catch(() => null);
     const detail = body && typeof body === "object" && "detail" in body ? body.detail : null;
     throw new ApiError(response.status, typeof detail === "string" ? detail : `Request failed (${response.status})`);
@@ -951,11 +987,18 @@ export default function App() {
                       <div className="catalog-grid">
                         {products.slice(productPage * 4, productPage * 4 + 4).map((product) => (
                           <article className="catalog-card" key={product.id}>
-                            <img
-                              className="product-image"
-                              src={productImage(product.category)}
-                              alt={`${product.category} equipment illustration`}
-                            />
+                            <figure className="product-image-frame">
+                              <img
+                                className="product-image"
+                                src={productImage(product.category)}
+                                alt={`${product.name} (${product.model_number}) category illustration`}
+                                width={640}
+                                height={420}
+                                loading="lazy"
+                                decoding="async"
+                              />
+                              <figcaption>Illustration, not a product photo</figcaption>
+                            </figure>
                             <div>
                               <small className="product-category">{product.category}</small>
                               <h2>{product.name}</h2>
@@ -963,7 +1006,6 @@ export default function App() {
                               <p className="panel-muted">Model: {product.model_number}</p>
                               <strong className="catalog-price">{formatPrice(product.price_ksh)}</strong>
                               <p className="product-specifications">{product.specifications}</p>
-                              <p className="product-image-note">Illustrative category image</p>
                             </div>
                           </article>
                         ))}
@@ -1000,7 +1042,18 @@ export default function App() {
               <div className="recommendation-list dashboard-products-grid">
                 {products.slice(0, 3).map((product) => (
                   <div className="recommendation" key={product.id}>
-                    <img className="dashboard-product-image" src={productImage(product.category)} alt={`${product.category} equipment illustration`} />
+                    <figure className="product-image-frame dashboard-product-image-frame">
+                      <img
+                        className="dashboard-product-image"
+                        src={productImage(product.category)}
+                        alt={`${product.name} (${product.model_number}) category illustration`}
+                        width={640}
+                        height={420}
+                        loading="lazy"
+                        decoding="async"
+                      />
+                      <figcaption>Illustration, not a product photo</figcaption>
+                    </figure>
                     <div className="dashboard-product-details">
                       <small className="product-category">{product.category}</small>
                       <b>{product.name}</b>

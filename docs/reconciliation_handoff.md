@@ -16,14 +16,17 @@
   `origin/fix/vercel-api-proxy`, preserving its authorship.
 - Production same-origin selection: `d24a802`, cherry-picked from the newly
   fetched `0ea6ebd` on that branch. Production ignores the development URL
-  override and uses the API rewrite. The intervening `eba9b5b` mixes GET retries
-  and product imagery and stays separate; its generic errors need reconciliation
-  with this branch's typed authentication/recovery errors before integration.
+  override and uses the API rewrite. At the first push, the intervening
+  `eba9b5b` stayed separate for review. It subsequently entered `main` and is
+  included in the PR conflict follow-up: GET-only retries and imagery are retained,
+  with typed authentication errors and cancellation preserved.
 - `origin/feature/frontend-copilot-visuals@c46c484` remains separate.
   It has not been merged or represented as verified by this checkpoint.
 
-No push, PR, merge into `main`/`dev`, or deployment was performed. Continue from
-this isolated checkout for review and browser testing.
+The initial branch was pushed as `0887e69`; PR #4 was then opened into `main`.
+The conflict follow-up integrates `main@0ea6ebd` into the feature branch only.
+No merge into `main`/`dev` or deployment was performed. Continue from this
+isolated checkout for review and browser testing.
 
 ## Integration decisions
 

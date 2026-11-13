@@ -1724,6 +1724,27 @@ are pending. Next: B reviews schema and authorization; A verifies PDF provenance
   deployed proxy verification. Final whitespace and original-file hash checks
   passed.
 
+### PR #4 conflict follow-up - 13 November 2026
+
+- User showed the two GitHub conflicts after `main` advanced to `0ea6ebd`.
+  Integrated that main into the isolated feature checkout; original dirty
+  checkout and `main`/`dev` remain unchanged. No force push or PR merge.
+- `DEPLOYMENT.md`: retained precise production/development routing guidance and
+  main's new 502 troubleshooting. `src/App.tsx`: combined main's GET-only retry
+  loop and friendly gateway errors with `ApiError` status preservation; check
+  cancellation before each attempt. Kept main's imagery JSX and auto-merged CSS.
+  Updated `docs/reconciliation_handoff.md` to distinguish the initial snapshot
+  from this follow-up. Workflow visuals `c46c484` remain separate.
+- Focused command: `node Q:\kpp\tmp\check_api_retry.mjs`, transpiling the actual
+  API function and mocking fetch/timers, passed assertions for typed 401,
+  transient GET recovery, no POST replay and no fetch after cancellation.
+  The temporary checker stays outside the committed checkout. No backend,
+  model, benchmark or native-media tests rerun for these frontend/doc changes.
+- `npm run lint` passed; `npm run build` passed (Vite **9.81 s**) using the
+  existing scoped low-memory settings. Whitespace and conflict-marker checks
+  passed. B/F review of the retry/auth combination remains requested through
+  PR #4; no browser/deployment verification or owner approval is claimed.
+
 ### Suggested coordination checklist per PR
 
 - [ ] I read `AGENTS.md`, master plan and latest relevant contracts.

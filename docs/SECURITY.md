@@ -3,12 +3,12 @@
 Status checked against repository `main@2675ac9` on 13 November 2026. The session
 work below was merged through PR #4; the original 79-test result is an earlier
 local checkpoint. Later reconciliation evidence is in the
-[reconciliation handoff](reconciliation_handoff.md). Deployed version and
+[reconciliation handoff](https://github.com/kwisdomk/kpp/blob/main/docs/reconciliation_handoff.md). Deployed version and
 production security have not been verified by this documentation review.
 
 This is a record of tested controls and open work, not a security certification
 or a claim that G2/G5 are complete. Source-document and vector access controls
-remain incomplete. See the [OCR contract](ocr_identification_contract.md).
+remain incomplete. See the [OCR contract](https://github.com/kwisdomk/kpp/blob/main/docs/ocr_identification_contract.md).
 
 ## Enforced behavior
 
@@ -51,7 +51,7 @@ reconciliation handoff. Browser and deployment behavior still need verification.
 The reconciliation handoff records a later **162-test backend suite** with
 isolated SQLite and mocked provider/native boundaries, plus **79 AI tests**.
 Those historical results do not establish live model, browser or deployment
-behavior. See [commands and limits](reconciliation_handoff.md#verification).
+behavior. See [commands and limits](https://github.com/kwisdomk/kpp/blob/main/docs/reconciliation_handoff.md#verification).
 The earlier session-specific run follows for traceability.
 
 `backend/tests/test_session_conversation_security.py` adds **38 regression cases**
@@ -85,7 +85,7 @@ No live model, browser or deployed service was exercised in this security run.
   endpoint. Audio validation, ASR adapters, fusion and account upload quotas are
   implemented. Native accuracy and browser media journeys remain unverified;
   automatic local disk reclamation remains incomplete. See
-  [media policy](../DEPLOYMENT.md#local-inference-and-media-selection).
+  [media policy](https://github.com/kwisdomk/kpp/blob/main/DEPLOYMENT.md#local-inference-and-media-selection).
 - Claim/numeric/citation validation, robust adversarial testing, complete failed-
   tool audit logging and calibrated confidence are absent. The review endpoint
   can receive an owned chat reference, but reviewer resolution/correction and

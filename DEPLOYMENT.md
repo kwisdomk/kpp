@@ -13,15 +13,13 @@ Create a Vercel project connected to this GitHub repository and configure:
 - Framework preset: Vite
 - Build command: `npm run build`
 - Output directory: `dist`
-- Production and Preview environment variable:
-  `VITE_API_BASE_URL=https://<your-primecloud-backend-domain>/api/v1`
 
-`vercel.json` contains the Vite build/output settings and SPA fallback for
-client-side routes. The API URL must be the full HTTPS PrimeCloud backend URL
-including `/api/v1`; do not include a trailing slash. Set this variable for
-each Vercel environment and redeploy after changing it. Never put database or
-AI-provider secrets in `VITE_*` variables because they are embedded in browser
-assets.
+`vercel.json` sends `/api/v1/*` requests to
+`https://kpp.primecloud.cloud/api/v1/*` before applying the SPA fallback. The
+browser therefore calls a same-origin API path and does not need
+`VITE_API_BASE_URL`. Update the rewrite destination if the backend domain
+changes. Never put database or AI-provider secrets in `VITE_*` variables
+because they are embedded in browser assets.
 
 ## PrimeCloud backend
 
@@ -72,8 +70,7 @@ for configured hosted AI and attachment/transcription features.
 
 1. Deploy the backend and database on PrimeCloud. Verify
    `https://<backend-domain>/ready` returns `{"status":"ready"}`.
-2. Set `VITE_API_BASE_URL` in Vercel to
-   `https://<backend-domain>/api/v1`.
+2. Verify `vercel.json` points `/api/v1/*` at the active backend domain.
 3. Set the exact Vercel production origin in PrimeCloud's `CORS_ORIGINS`.
 4. Deploy/redeploy the Vercel frontend and test login, catalogue loading, chat,
    and attachment removal.
@@ -91,3 +88,18 @@ For local backend development, copy `backend/.env.example` to `backend/.env`.
 The backend loads that file when present and does not override environment
 variables provided by the shell or hosting platform. Real `.env` files are
 excluded by `.gitignore`; commit only the `.env.example` templates.
+
+## Troubleshooting 502 responses
+
+Check the backend directly before changing frontend code:
+
+- `/health` returns `{"status":"ok"}` when the API process is reachable.
+- `/ready` returns `{"status":"ready"}` when the API and database are reachable.
+- If either direct backend endpoint returns a Cloudflare 502, inspect the
+  PrimeCloud service's deployment/runtime logs and domain routing. Confirm the
+  service is running the Python `Procfile`, binds to the platform-provided
+  `PORT` on `0.0.0.0`, and uses `/ready` as its health check. A repository change
+  cannot repair an unavailable origin or incorrect PrimeCloud domain mapping.
+- If the backend health endpoints work but the Vercel `/api/v1/health` URL
+  returns the frontend HTML, redeploy Vercel from a branch containing the API
+  rewrite in `vercel.json`.

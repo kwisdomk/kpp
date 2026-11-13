@@ -35,11 +35,19 @@ def get_session_user(request: Request, db: Session) -> tuple[SessionDB, UserDB] 
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if not token:
         return None
-    session = db.scalar(select(SessionDB).where(SessionDB.token_hash == hash_session_token(token)))
+    return get_session_user_by_hash(hash_session_token(token), db)
+
+
+def get_session_user_by_hash(token_hash: str, db: Session) -> tuple[SessionDB, UserDB] | None:
+    """Apply the same lifecycle checks to cookie and session-bound bearer auth."""
+
+    session = db.scalar(select(SessionDB).where(SessionDB.token_hash == token_hash))
     if session is None or session.revoked_at is not None:
         return None
     user = db.get(UserDB, session.user_id)
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or user.role not in {"engineer", "customer"}:
+        session.revoked_at = utc_now()
+        db.commit()
         return None
     now = utc_now()
     expires_at = session.expires_at.replace(tzinfo=timezone.utc) if session.expires_at.tzinfo is None else session.expires_at

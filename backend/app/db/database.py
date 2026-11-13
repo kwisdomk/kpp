@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Generator
 
 from passlib.context import CryptContext
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, create_engine, select, text
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Integer, String, Text, create_engine, inspect, select, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import ArgumentError, OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -189,6 +189,18 @@ class ProductDB(Base):
     price_ksh: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
+class ProductAccessDB(Base):
+    """Explicit catalogue grants; a product without a grant is not retrievable."""
+
+    __tablename__ = "product_access"
+    __table_args__ = (
+        CheckConstraint("access_level IN ('public', 'engineer')", name="valid_product_access_level"),
+    )
+
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), primary_key=True)
+    access_level: Mapped[str] = mapped_column(String(16), nullable=False)
+
+
 class AuditLogDB(Base):
     __tablename__ = "audit_logs"
 
@@ -287,6 +299,7 @@ def init_db() -> None:
 def _initialize_database_once() -> None:
     with engine.connect() as connection:
         connection.execute(text("SELECT 1"))
+    had_access_table = inspect(engine).has_table("product_access")
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
         if db.scalar(select(UserDB).where(UserDB.username == "engineer@jenga.com")) is None:
@@ -304,7 +317,8 @@ def _initialize_database_once() -> None:
                     ),
                 ]
             )
-        if db.scalar(select(ProductDB).where(ProductDB.model_number == "JCG-1000")) is None:
+        seed_products = db.scalar(select(ProductDB).where(ProductDB.model_number == "JCG-1000")) is None
+        if seed_products:
             db.add_all(
                 [
                     ProductDB(
@@ -330,6 +344,15 @@ def _initialize_database_once() -> None:
                     ),
                 ]
             )
+        db.flush()
+        if not had_access_table or seed_products:
+            # One-time upgrade/new-db classification of the known shared demo
+            # rows only. Never classify unknown products or overwrite a grant.
+            for product in db.scalars(
+                select(ProductDB).where(ProductDB.model_number.in_(["JCG-1000", "JCT-500", "JCS-50"]))
+            ):
+                if db.get(ProductAccessDB, product.id) is None:
+                    db.add(ProductAccessDB(product_id=product.id, access_level="public"))
         db.commit()
 
 

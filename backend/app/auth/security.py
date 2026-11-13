@@ -12,8 +12,8 @@ from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.database import UserDB, get_db, pwd_context
-from app.core.sessions import get_session_user
+from app.db.database import SessionDB, UserDB, get_db, hash_session_token, pwd_context
+from app.core.sessions import get_session_user, get_session_user_by_hash
 
 SECRET_KEY = os.getenv("JENGA_SECRET_KEY", "change-this-development-secret")
 ALGORITHM = "HS256"
@@ -21,27 +21,36 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 
-def create_access_token(username: str, role: str) -> str:
+def create_access_token(username: str, role: str, session_token: str) -> str:
     expires = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    return jwt.encode({"sub": username, "role": role, "exp": expires}, SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode(
+        {"sub": username, "role": role, "exp": expires, "sid": hash_session_token(session_token)},
+        SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
 
 
 def authenticate_user(db: Session, username: str, password: str) -> UserDB | None:
     user = db.scalar(select(UserDB).where(UserDB.username == username))
-    if user is None or not pwd_context.verify(password, user.hashed_password):
+    if (
+        user is None or not user.is_active or user.role not in {"engineer", "customer"}
+        or not pwd_context.verify(password, user.hashed_password)
+    ):
         return None
     return user
 
 
-def get_current_user(
+def get_current_session(
     request: Request,
     token: Annotated[str | None, Depends(oauth2_scheme)],
     db: Annotated[Session, Depends(get_db)],
-) -> UserDB:
-    session_user = get_session_user(request, db)
-    if session_user is not None:
-        return session_user[1]
+) -> tuple[SessionDB, UserDB]:
+    """Prefer an explicit bearer token; never recover invalid bearer auth via a cookie."""
+
     if token is None:
+        session_user = get_session_user(request, db)
+        if session_user is not None:
+            return session_user
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing or expired authentication token",
@@ -56,14 +65,25 @@ def get_current_user(
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username = payload.get("sub")
         role = payload.get("role")
-        if not isinstance(username, str) or role not in {"engineer", "customer"}:
+        session_hash = payload.get("sid")
+        if (
+            not isinstance(username, str) or role not in {"engineer", "customer"}
+            or not isinstance(session_hash, str) or len(session_hash) != 64
+        ):
             raise credentials_error
     except (JWTError, TypeError):
         raise credentials_error from None
 
-    user = db.scalar(select(UserDB).where(UserDB.username == username))
-    # The role is checked against the database as well as the token. This
-    # prevents stale or client-forged role claims from granting access.
-    if user is None or user.role != role:
+    session_user = get_session_user_by_hash(session_hash, db)
+    if session_user is None:
         raise credentials_error
-    return user
+    _, user = session_user
+    if user.username != username or user.role != role:
+        raise credentials_error
+    return session_user
+
+
+def get_current_user(
+    authenticated: Annotated[tuple[SessionDB, UserDB], Depends(get_current_session)],
+) -> UserDB:
+    return authenticated[1]

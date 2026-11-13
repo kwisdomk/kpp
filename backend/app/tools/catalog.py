@@ -1,10 +1,10 @@
 """Catalog lookup tool."""
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.database import ProductDB
+from app.db.database import ProductDB, UserDB
+from app.services.authorization import authorized_products_statement
 
 
-def lookup_products(db: Session) -> list[ProductDB]:
-    return list(db.scalars(select(ProductDB).order_by(ProductDB.name)).all())
+def lookup_products(db: Session, user: UserDB) -> list[ProductDB]:
+    return list(db.scalars(authorized_products_statement(user).order_by(ProductDB.name)).all())

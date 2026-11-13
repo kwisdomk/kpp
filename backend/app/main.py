@@ -13,6 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.api import auth, catalog, chat, conversations, media, reviews
 from app.db.database import engine, init_db
 from app.schemas.common import HealthResponse
+from app.core.media_limits import MediaUploadLimitMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +25,12 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Jenga Consultants Product Copilot", version="1.0.0", lifespan=lifespan)
+app.add_middleware(MediaUploadLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
 app.include_router(auth.router)

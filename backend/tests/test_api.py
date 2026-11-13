@@ -14,7 +14,8 @@ def test_readiness_checks_database() -> None:
 
 def test_catalogue_api_returns_live_backend_products() -> None:
     with TestClient(app) as client:
-        response = client.get("/api/v1/catalogue/products")
+        login = client.post("/auth/login", json={"username": "customer@jenga.com", "password": "customer123"})
+        response = client.get("/api/v1/catalogue/products", headers={"Authorization": f"Bearer {login.json()['access_token']}"})
 
     assert response.status_code == 200
     products = response.json()

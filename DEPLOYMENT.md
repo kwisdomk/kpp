@@ -16,6 +16,44 @@ frontend and backend on one PrimeCloud domain.
 
 ## Local container validation
 
+The OCR/image boundary, shared catalogue grants and error contract are documented
+in [docs/ocr_identification_contract.md](docs/ocr_identification_contract.md).
+The Dockerfile now includes Tesseract plus English data; that Docker build has
+not been exercised in this checkpoint. Sanitized images belong in the persistent
+private `/app/data/uploads` directory, never the frontend/public directory.
+Windows backend startup requires `TESSERACT_CMD` set to the verified executable
+path in that note. Restart and log in again after the session-binding changes.
+
+### Optional local text model
+
+The backend can use LM Studio's OpenAI-compatible Chat Completions endpoint.
+For a backend running directly on the model host, set:
+
+```powershell
+$env:LLM_BASE_URL = "http://127.0.0.1:1234/v1"
+$env:LLM_MODEL = "qwen3.5-4b-claude-4.6-opus-reasoning-distilled"
+```
+
+Use the exact model identifier from the server. Set `LLM_API_KEY` only if that
+server requires authentication. `LLM_TIMEOUT_SECONDS` defaults to 180 and
+`LLM_MAX_TOKENS` to 1024; incomplete or reasoning-only answers return an error.
+Configuring `LLM_BASE_URL` selects this endpoint exclusively, even when a hosted
+key exists. A failed local request never falls back to the hosted provider.
+Without `LLM_BASE_URL`, the existing optional OpenAI configuration is unchanged.
+
+For Docker Desktop on Windows, the host address is normally
+`http://host.docker.internal:1234/v1`; the server must accept connections from
+the container. Container loopback refers to the container itself. A PrimeCloud
+container cannot reach a laptop through `127.0.0.1`; hosted deployment requires
+an explicitly reachable, appropriately protected model service. This patch does
+not expose the local model server or configure a public tunnel.
+
+Catalogue APIs, including legacy aliases, require authentication. Current product
+rows are shared synthetic demo data. There is no per-product visibility schema
+yet; do not add restricted documents or internal costs to these rows. Returned
+`product:ID` citations identify supplied catalogue context, not approved manual
+pages or independent claim verification. Cross-role API review is required.
+
 From the repository root:
 
 ```powershell

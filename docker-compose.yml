@@ -7,11 +7,18 @@ services:
         VITE_API_BASE_URL: /api/v1
     environment:
       DATABASE_URL: sqlite:////app/data/jenga_consultants.db
+      MEDIA_STORAGE_DIR: /app/data/uploads
+      TESSERACT_CMD: tesseract
       APP_ENV: development
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
       JENGA_SECRET_KEY: ${JENGA_SECRET_KEY:-local-development-only-change-me}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-180}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-1024}
       PORT: 8080
     volumes:
       - app-data:/app/data

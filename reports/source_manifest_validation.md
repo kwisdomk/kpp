@@ -2,7 +2,7 @@
 
 12 November 2026, Africa/Nairobi. Current branch: `feature/ai-catalogue-sources`.
 
-Python: `C:\Users\wisdo\AppData\Local\Python\pythoncore-3.14-64\python.exe`
+Python: `%LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe`
 (version 3.14.7). Standard library only.
 
 | Command using this interpreter | Result |

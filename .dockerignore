@@ -9,4 +9,5 @@ __pycache__
 .pytest_cache
 *.pyc
 backend/data
+data/uploads
 jenga_consultants.db

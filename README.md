@@ -5,9 +5,13 @@ fictional industrial-equipment seller. Company accounts and catalogue prices are
 demo data. Equipment specifications need traceable source documents.
 
 The repository contains a React frontend, a FastAPI backend, and AI source
-validation tools. Text chat and catalogue tools are implemented. Image and audio
-inputs are present in the interface, but OCR, transcription, source retrieval and
-a complete multimodal answer flow have not been verified.
+validation tools. Text chat and catalogue tools are implemented. A backend
+nameplate-OCR baseline has authenticated image handling and filtered catalogue
+matching; its [contract and verification limits](docs/ocr_identification_contract.md)
+are documented. Photo/audio submission, private canonical WAV storage and input
+fusion are wired; [speech setup and integration limits](docs/asr_handoff.md)
+are documented. Native speech inference, browser recording, approved source
+retrieval and the complete cited multimodal answer flow remain unverified or unfinished.
 
 The assistant provides decision support. It does not replace a manufacturer
 manual or a qualified engineer.
@@ -72,10 +76,15 @@ unapproved; the source manifest has 19 pending rows and zero approved assets.
 Document URLs and hashes are recorded for 13 candidate slots. Rights and
 technical review remain pending. See [DATA.md](DATA.md).
 
-LM Studio has served basic chat and embedding probes locally. The backend still
-uses the hosted provider when configured; the local-model adapter and authorized
-retrieval flow are pending. Model revision, checksum and licence records also
-remain incomplete. See the [AI handoff](docs/AI_HANDOFF.md).
+The backend supports an explicitly configured local model through `LLM_BASE_URL`
+and `LLM_MODEL`; the existing hosted provider remains optional. Local mode never
+falls back to the hosted provider. Setup and verification limits are in the
+[local chat handoff](docs/LOCAL_CHAT_HANDOFF.md). Authorized document retrieval
+and model revision, checksum and licence records remain incomplete. See the
+[AI handoff](docs/AI_HANDOFF.md).
+
+The [security note](docs/SECURITY.md) records session enforcement and conversation
+checks, fresh-login requirements, regression evidence and remaining work.
 
 ## Deployment
 

@@ -23,7 +23,7 @@ It has not been copied into the dataset.
 ## Check and reproduce
 
 Python 3.14.7 was used via
-`C:\Users\wisdo\AppData\Local\Python\pythoncore-3.14-64\python.exe`.
+`%LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe`.
 Commands below run from the project root with that interpreter:
 
 ```powershell

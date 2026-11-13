@@ -10,7 +10,7 @@ RUN npm run build
 
 FROM python:3.12-alpine
 
-RUN apk add --no-cache nginx \
+RUN apk add --no-cache nginx tesseract-ocr tesseract-ocr-data-eng \
     && addgroup -S appuser \
     && adduser -S -D -H -G appuser appuser \
     && mkdir -p /app/data \

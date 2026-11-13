@@ -1,0 +1,36 @@
+{
+  "date": "2026-11-13",
+  "scope": "native_ocr_identification_route_smoke",
+  "is_benchmark": false,
+  "synthetic_distinct_images": 3,
+  "requests": 6,
+  "image_generation": "Pillow RGB 1200x220, white background, black Arial 64 text at 40x60",
+  "data_kind": "synthetic nameplate text using existing synthetic catalogue model codes",
+  "runtime": {
+    "engine": "Tesseract",
+    "version": "5.4.0.20240606",
+    "executable": "C:\\Program Files\\Tesseract-OCR\\tesseract.exe",
+    "language": "eng",
+    "page_segmentation_mode": 6,
+    "omp_thread_limit": 1,
+    "timeout_seconds": 20,
+    "installer_sha256": "c885fff6998e0608ba4bb8ab51436e1c6775c2bafc2559a19b423e18678b60c9",
+    "executable_sha256": "babb405f4366b480d02cd8ff2bac8d497170f6c1711ce6f3d5d8bf0fb7fa6ed9",
+    "english_traineddata_sha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2"
+  },
+  "results": [
+    {"role": "customer", "synthetic_input": "JCG-1000", "status": "identified", "candidates": ["JCG-1000"], "elapsed_seconds": 0.406, "requires_confirmation": true},
+    {"role": "customer", "synthetic_input": "JCG-1000 JCS-50", "status": "ambiguous", "candidates": ["JCG-1000", "JCS-50"], "elapsed_seconds": 0.38, "requires_confirmation": true},
+    {"role": "customer", "synthetic_input": "UNKNOWN-123", "status": "unidentified", "candidates": [], "elapsed_seconds": 0.28, "requires_confirmation": true},
+    {"role": "engineer", "synthetic_input": "JCG-1000", "status": "identified", "candidates": ["JCG-1000"], "elapsed_seconds": 0.27, "requires_confirmation": true},
+    {"role": "engineer", "synthetic_input": "JCG-1000 JCS-50", "status": "ambiguous", "candidates": ["JCG-1000", "JCS-50"], "elapsed_seconds": 0.279, "requires_confirmation": true},
+    {"role": "engineer", "synthetic_input": "UNKNOWN-123", "status": "unidentified", "candidates": [], "elapsed_seconds": 0.292, "requires_confirmation": true}
+  ],
+  "limitations": [
+    "FastAPI TestClient used real authentication, sanitized upload, isolated SQLite, and native OCR; no OCR or model mock in these six requests.",
+    "Elapsed times cover identification requests, excluding upload; these are smoke timings, not a latency benchmark.",
+    "Three clean generated images reused across roles do not satisfy the 30-image minimum or an independent held-out evaluation.",
+    "No real equipment, manufacturer-page evidence, browser, audio, general part recognition or repair guidance was evaluated.",
+    "Temporary image files and database were removed after execution."
+  ]
+}

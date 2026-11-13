@@ -33,7 +33,7 @@ CHANGED FILES:
   - DATA.md (candidate count, evidence and rights status)
   - ai/ingestion/normalize_specs.py (source/specification linking and catalogue validation)
   - ai/tests/test_normalize_specs.py (specification validation tests)
-  - JENGA_CONSULTANTS_MASTER_PLAN.md (section 19 ledger updated)
+  - project-plan.md (section 19 ledger updated)
   - docs/AI_HANDOFF.md (this handoff)
 CONTRACT CHANGES: none to backend/frontend APIs or DB tables; test adapters within ai/ only
 TEST COMMAND(S) AND REAL RESULT:

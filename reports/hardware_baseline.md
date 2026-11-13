@@ -58,8 +58,12 @@ The default `python`, `python3` and `py` aliases were inaccessible. An existing
 interpreter used was:
 
 ```text
-C:\Users\wisdo\AppData\Local\Python\pythoncore-3.14-64\python.exe
+%LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe
 ```
 
 All admission tests use the standard library only. No heavy packages, weights,
 services or paid providers were installed or enabled.
+
+### Hardware recheck: 13 November 2026
+
+A Windows hardware query reported an HP Victus 15-fa2xxx, Intel Core i5-13420H (8 cores, 12 logical processors), and 8,201,113,600 bytes of OS-visible physical memory (7.64 GiB). Windows reports Windows 11 Pro, version 10.0.26300. `nvidia-smi` reported an NVIDIA GeForce RTX 3050 6GB Laptop GPU with 6,144 MiB VRAM and driver 621.14. This confirms the queried hardware, not the machine's team-assigned name or available memory during inference.

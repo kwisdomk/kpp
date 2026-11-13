@@ -1,13 +1,13 @@
 # AGENTS.md — Jenga Consultants Product Copilot
 
-Read this file at the start of a coding session. It records team ownership and working rules. The technical plan is [`JENGA_CONSULTANTS_MASTER_PLAN.md`](./JENGA_CONSULTANTS_MASTER_PLAN.md). Check its execution ledger (§19) and the current source before editing; use documented decisions rather than asking the user to repeat them.
+Read this file at the start of a coding session. It records team ownership and working rules. The technical plan is [`project-plan.md`](./project-plan.md). Check its execution ledger (§19) and the current source before editing; use documented decisions rather than asking the user to repeat them.
 
 ## Project identity and fixed constraints
 
 - Product: **Jenga Consultants Product Copilot**, AI assistant for a **fictional** industrial-equipment seller, serving **engineer** and **customer** roles.
 - Hackathon: Zetech Alumni × Student Hackathon, Machine Learning & Data Science, Challenge 3 (Advanced), 12–13 November 2026.
-- Team: **exactly three members**, one each for **Frontend (F)**, **Backend/Security (B)**, **AI/Data/Evaluation (A)**. One of these is team lead; one is the qualifying Alumni/Finalist Collaborator. Do not invent names.
-- Compute: **ATHENA ONLY** — HP Victus 15, NVIDIA GeForce RTX 3050 Laptop GPU **6 GB VRAM** (diagnostically verified; corrects earlier RTX 4050 planning assumption), i5-13420H; prior RAM reading **8 GB, verify before model loading**. Never assume ZBook, cloud GPU, distributed inference, RAM upgrades or paid API access.
+- Team: **four members**: two in **Frontend (F)**, one in **Backend/Security (B)** and one in **AI/Data/Evaluation (A)**. Check the official submission rules for team eligibility. One of these is team lead; one is the qualifying Alumni/Finalist Collaborator. Do not invent names.
+- Compute: **ATHENA ONLY** — HP Victus 15, NVIDIA GeForce RTX 3050 Laptop GPU **6 GB VRAM**, i5-13420H; **7.64 GiB OS-visible RAM**; check free memory before model loading. Never assume ZBook, cloud GPU, distributed inference, RAM upgrades or paid API access.
 - Stack direction: React/TypeScript/Vite frontend; FastAPI/Python backend; SQLite authoritative catalogue, FTS + small text embeddings; local LM Studio or compatible llama.cpp inference; Tesseract for baseline nameplate OCR; whisper.cpp ASR; seeded Python synthetic generation. Model/provider alternatives must be verified and be optional.
 - Data minimum: **3 product categories, 15 documented equipment products, 30 labeled images, 15 labeled audio queries, 60 grounded benchmark items** (20 engineer/20 customer/10 multimodal/10 adversarial).
 - Source strategy: licensed **real technical** documents + explicitly synthetic fictional company, user, supplier, inventory, prices, internal records and operational scenarios. **No invented real equipment technical facts**; synthetic content never mislabeled as observed truth.
@@ -45,6 +45,14 @@ Read this file at the start of a coding session. It records team ownership and w
 - Dependency handoff: canonical schema and ACL contract from B; output citation schema to F/B.
 
 ## Cross-agent operating rules
+
+### Paused local development experiment
+
+AGENT-A briefly tested the local Qwen model with OpenCode as a coding assistant.
+The experiment is paused; project model use remains focused on inference. It is
+not a completed product feature or benchmark. See
+[`docs/misc/local_model_development_experiment.md`](./docs/misc/local_model_development_experiment.md)
+for observations and the unverified working-tree impact.
 
 ### Code and writing style
 
@@ -89,4 +97,4 @@ LEDGER UPDATE (section 19):
 - A demo: source manifest and all minimum counts, authorized retrieval, measured WER + held-out image accuracy, 60 questions, adversarial before/after, model comparison, real reports.
 - Whole team: `python scripts/rebuild_and_eval.py` works **after documented dependency/model setup** without hidden indexing steps; `README.md`, `DATA.md`, model/security/eval notes, SDG, disclosure, contribution note and backup demo video are present before organizer code freeze.
 
-**Project decisions not yet established (never guess):** teammate names and branch ownership, actual current repo files, actual Athena installed RAM/free VRAM, eligible source/model licenses, final 15 real equipment models, watsonx/free API entitlement, real benchmark scores, published submission freeze and final demo URL. Record verified changes in §19 of the master plan.
+**Project decisions not yet established (never guess):** teammate names and branch ownership, actual current repo files, current Athena free RAM/VRAM, eligible source/model licenses, final 15 real equipment models, watsonx/free API entitlement, real benchmark scores, published submission freeze and final demo URL. Record verified changes in §19 of the master plan.

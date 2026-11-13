@@ -1,134 +1,209 @@
 # Jenga Consultants Product Copilot
 
-A prototype assistant for the engineers and customers of Jenga Consultants, a
-fictional industrial-equipment seller. Company accounts and catalogue prices are
-demo data. Equipment specifications need traceable source documents.
+A product assistant for the customers and engineers of **Jenga Consultants**, a fictional industrial-equipment seller. It brings product questions, catalogue prices and comparisons into one conversation interface, with access controlled by the backend.
 
-The repository contains a React frontend, a FastAPI backend, and AI source
-validation tools. Text chat and catalogue tools are implemented. A backend
-nameplate-OCR baseline has authenticated image handling and filtered catalogue
-matching; its [contract and verification limits](docs/ocr_identification_contract.md)
-are documented. Photo/audio submission, private canonical WAV storage and input
-fusion are wired; [speech setup and integration limits](docs/asr_handoff.md)
-are documented. Native speech inference, browser recording, approved source
-retrieval and the complete cited multimodal answer flow remain unverified or unfinished.
+Built for the **Zetech Alumni × Student Hackathon**, 12–13 November 2026, under **Challenge 3: Product Copilot**, Machine Learning & Data Science.
 
-The assistant provides decision support. It does not replace a manufacturer
-manual or a qualified engineer.
+[Hosted prototype](https://jenga-ai-ebon.vercel.app/) · [Installation](#installation) · [How to use it](#how-to-use-it)
 
-## Run locally
+**Status:** a prototype with unfinished technical-source retrieval and multimodal evaluation. Company records and the seeded catalogue are synthetic demo data. The assistant supports decisions; it does not replace manufacturer documentation or a qualified engineer.
 
-The frontend is in `src/` at the repository root. The backend is in `backend/`.
-Use Python 3.11 or newer and a Node.js version supported by the installed Vite
-release.
+## Purpose and users
 
-From the repository root, create the Python environment and start the backend:
+Product information is scattered across catalogues and manuals, while customers and engineers need different levels of access. This project explores a shared assistant for both roles:
+
+| User | Purpose |
+| --- | --- |
+| Customer | Explore equipment, check catalogue prices and compare available products. |
+| Engineer | Ask technical questions and use equipment-identification and service-support workflows as they become supported by reviewed sources. |
+
+The intended contribution to **SDG 9: Industry, Innovation and Infrastructure** is easier access to equipment information. Real-world impact has not been measured.
+
+## Features and technology
+
+- **React, TypeScript and Vite:** workspace, sign-in, chat, catalogue browsing and account-bound conversations.
+- **FastAPI and Python:** authentication, session expiry, catalogue access, tools and human-review requests.
+- **SQLAlchemy:** SQLite for local development, with MySQL support for hosting.
+- **Catalogue tools:** code-based prices and structured comparisons.
+- **Local inference:** a configurable LM Studio or compatible model connection, plus Tesseract OCR and whisper.cpp speech adapters.
+- **Data tooling:** source manifests, validation tools and automated tests.
+
+The backend determines the trusted role and filters catalogue access before retrieval. Local model errors do not trigger an automatic hosted fallback. An optional hosted attachment-processing profile is documented separately below.
+
+## Prerequisites
+
+- Git.
+- **Python 3.11**, matching `.python-version`, and pip.
+- **Node.js 22.12 or newer** and npm, compatible with the installed Vite version.
+- For generated local answers: LM Studio or a compatible model server, and a downloaded model that fits the machine's available memory.
+- For local image identification: Tesseract with English language data.
+- For local speech: whisper.cpp and a compatible speech-model file.
+
+The catalogue and deterministic tools can run without a language model. Python dependency installation does not install native tools or model weights. Check available RAM and VRAM before loading a model.
+
+## Installation
+
+The commands below use **PowerShell on Windows**. Run them from the repository root unless stated otherwise.
 
 ```powershell
-python -m venv .venv
+git clone https://github.com/kwisdomk/kpp.git
+Set-Location kpp
+
+py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -r backend/requirements.txt
-Copy-Item backend/.env.example backend/.env
-Copy-Item .env.example .env
-$env:PYTHONPATH = "backend"
-python -m uvicorn app.main:app --reload --port 8000
+python -m pip install -r requirements.txt
 ```
 
-In a second terminal, install the frontend dependencies and set the API address:
+For an existing checkout, enter that folder instead of cloning again. If the `py` launcher is unavailable, use `python -m venv .venv` after confirming the Python version.
+
+Create the environment files only if they do not already exist:
+
+```powershell
+if (!(Test-Path backend/.env)) {
+    Copy-Item backend/.env.example backend/.env
+}
+if (!(Test-Path .env)) {
+    Copy-Item .env.example .env
+}
+```
+
+| File | Purpose |
+| --- | --- |
+| `backend/.env` | Database, session secret, model connection and media settings. The backend loads this file at startup. |
+| Root `.env` | Frontend configuration. Vite exposes `VITE_*` values to the browser, so they must never contain secrets. |
+
+Replace the `JENGA_SECRET_KEY` placeholder in `backend/.env` with a long random value. Keep the default SQLite connection for a local demo. Both environment files are ignored by Git.
+
+### Connect a local model
+
+Start LM Studio's server and load your chosen model. In **`backend/.env`**, set:
+
+```dotenv
+LLM_BASE_URL=http://127.0.0.1:1234/v1
+LLM_MODEL=replace-with-the-exact-served-model-id
+LLM_API_KEY=
+LLM_TIMEOUT_SECONDS=180
+LLM_MAX_TOKENS=1024
+ENABLE_HOSTED_MEDIA=false
+```
+
+Use the exact model identifier served by the model server. If it requires authentication, set `LLM_API_KEY` to its key; otherwise leave that value empty. Include `/v1` in the URL. Restart the backend after changing model settings.
+
+The root `.env` should contain:
+
+```dotenv
+VITE_API_BASE_URL=http://localhost:8000/api/v1
+```
+
+With no local endpoint or hosted key configured, chat uses a limited catalogue fallback rather than generated answers. See [local chat setup](docs/LOCAL_CHAT_HANDOFF.md) for details.
+
+## Start the app
+
+**Terminal 1 — backend**, with the Python environment activated:
+
+```powershell
+$env:PYTHONPATH = ".;backend"
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Startup creates database tables and seeds development accounts and the synthetic catalogue.
+
+**Terminal 2 — frontend**, from the repository root:
 
 ```powershell
 npm ci
-npm run dev
+npm run dev -- --host localhost --port 5173
 ```
 
-Open the URL printed by Vite. The API address above matches the backend command;
-the frontend's current fallback address uses port 8080.
+Open **http://localhost:5173**. Keep the frontend, backend and local model server running while using generated chat.
 
-## Backend
+## How to use it
 
-The FastAPI backend is in [`backend/`](./backend). It supports the modular `/api/v1`
-routes described in the project plan, including authentication, sessions, catalogue
-tools, conversations, media validation, chat, and human-review requests.
-The account chat accepts up to two images, PDFs, DOCX, TXT, Markdown, CSV, or voice
-notes per message (8 MiB each). Image/PDF analysis and voice transcription use the
-configured OpenAI API; document text is extracted for NLP analysis. Configure
-`OPENAI_API_KEY` to enable those attachment and voice features. Users must confirm
-they are authorized to send attachments to the configured AI service; do not send
-private or restricted information unless its use with that service is approved.
-Uploaded bytes are deleted after successful processing or removal, and pending
-uploads expire after 24 hours (64 MiB/20 files maximum per account).
+1. **Sign in.** The seed defines `customer@jenga.com` and `engineer@jenga.com`. Use the development credentials defined in the [account seed](backend/app/db/database.py); existing databases may have different credentials. These accounts are for demonstrations only.
+2. **Browse Products.** Check which products your account can access. Displayed prices and specifications belong to the synthetic catalogue.
+3. **Open Chat Assistant.** Try `What are the catalogue prices?` for deterministic pricing or `Compare JCG-1000 and JCT-500` for a structured comparison. General questions use the configured model when available.
+4. **Inspect the response.** Check its warnings, tool label and available citations. Catalogue-row citations are not manufacturer-manual citations. Confidence labels are not measured accuracy.
+5. **Try media after setup.** Attach a clear nameplate photo or a short voice question. The interface allows up to two attachments, each up to 8 MiB. Local fusion accepts at most one image and one audio recording.
+6. **Sign out** when finished. The backend revokes the submitted session.
 
-Health endpoints:
+For consequential engineering questions, verify the source, **check the manual and follow local regulations**, and involve a qualified engineer. Review-request submission exists; a complete reviewer-resolution workflow still needs verification.
 
-- `GET http://localhost:8000/api/v1/health` checks that the API is running.
-- `GET http://localhost:8000/api/v1/ready` checks database connectivity.
+### Image, voice and document processing
 
-The backend seeds demo accounts and products. Use them only for development and
-demonstrations. Deployment requires a separate `JENGA_SECRET_KEY`; demo passwords
-are not suitable for a public production service.
+Local processing is the default. Configure `TESSERACT_CMD`, `WHISPER_CPP_CMD` and `WHISPER_MODEL_PATH` in `backend/.env` after installing the tools. Browser audio is converted to PCM16 mono 16 kHz WAV for the local path. If setting `MEDIA_STORAGE_DIR`, use a private directory outside public/static folders.
 
-The ignored `.env` files are local-only and must never be committed. Use
-`backend/.env.production.example` as a checklist for PrimeCloud production
-settings. Vercel and PrimeCloud do not receive ignored local files from Git;
-configure production values in each provider's environment/secrets settings.
+PDF, DOCX, text, Markdown and CSV attachments require the optional hosted profile: `OPENAI_API_KEY`, `ENABLE_HOSTED_MEDIA=true`, no selected `LLM_BASE_URL`, and consent for each request. The backend also checks whether the context is permitted for hosted processing. Do not send private or restricted material without approval.
 
-## Checks
+See [media policy and retention](DEPLOYMENT.md#local-inference-and-media-selection), [OCR setup](docs/ocr_identification_contract.md) and [speech setup](docs/asr_handoff.md) for requirements and current limits.
 
-AI source-validation tests use the Python standard library:
+## Checks and troubleshooting
+
+Check the API and database from another terminal:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/api/v1/health
+Invoke-RestMethod http://127.0.0.1:8000/api/v1/ready
+```
+
+Expected statuses are `ok` and `ready`. Interactive API documentation is at **http://127.0.0.1:8000/docs**. Send a chat message separately to verify the model connection.
+
+| Symptom | Check |
+| --- | --- |
+| Sign-in or catalogue cannot reach the backend | Backend terminal, port 8000 and frontend `VITE_API_BASE_URL`. |
+| `Local AI service request failed` | Model server logs, exact model ID and `LLM_API_KEY`. |
+| AI timeout or incomplete answer | Model readiness, available memory and time/token limits. |
+| OCR or speech unavailable | Native executable paths, English language data and speech-model file. |
+| Documents unavailable | Approved document retrieval is unfinished; the upload controls also depend on the selected processing profile. |
+
+AI component checks, with the Python environment activated:
 
 ```powershell
 python -B -m unittest discover -s ai/tests -v
 ```
 
+Run backend tests with `PYTHONPATH` set as in the startup instructions. This command selects a separate test database and disables real provider/model settings before loading the app:
+
+```powershell
+python -B -c "import os, pytest; os.environ.update(DATABASE_URL='sqlite:///./test_jenga.db', LLM_BASE_URL='', OPENAI_API_KEY='', ENABLE_HOSTED_MEDIA='false'); raise SystemExit(pytest.main(['backend/tests', '-q']))"
+```
+
+Tests use mocked model/native boundaries and do not measure real OCR, speech or answer quality. Recorded results and verification limits are in the [reconciliation handoff](docs/reconciliation_handoff.md).
+
 Frontend checks:
 
 ```powershell
+node --test tests/frontend_error_states.test.mjs
 npm run lint
 npm run build
 ```
 
-These checks do not establish model quality or complete application readiness.
+## Current limitations
 
-## Data and model status
+- The source catalogue has **15 candidates across three categories**, with **19 pending manifest entries and zero approved source assets**. Rights and technical review are pending. See [DATA.md](DATA.md).
+- Approved manual retrieval, page-grounded answers and the complete cited image/voice workflow are unfinished or unverified.
+- Measured multimodal accuracy, the required benchmark and adversarial evaluation, model provenance and the one-command knowledge-base build/evaluation remain incomplete.
+- Successful tests or model calls do not establish production readiness. Synthetic catalogue data is not a binding quotation or verified manufacturer evidence.
 
-The AI catalogue has 15 candidates across three categories. All remain
-unapproved; the source manifest has 19 pending rows and zero approved assets.
-Document URLs and hashes are recorded for 13 candidate slots. Rights and
-technical review remain pending. See [DATA.md](DATA.md).
+The [execution ledger](project-plan.md) and [security note](docs/SECURITY.md) record detailed progress and remaining work.
 
-The backend supports an explicitly configured local model through `LLM_BASE_URL`
-and `LLM_MODEL`; the existing hosted provider remains optional. Local mode never
-falls back to the hosted provider. Setup and verification limits are in the
-[local chat handoff](docs/LOCAL_CHAT_HANDOFF.md). Authorized document retrieval
-and model revision, checksum and licence records remain incomplete. See the
-[AI handoff](docs/AI_HANDOFF.md).
+## Repository guide
 
-The [security note](docs/SECURITY.md) records session enforcement and conversation
-checks, fresh-login requirements, regression evidence and remaining work.
-
-The reconciliation retains upstream account chat history and split hosting.
-Photo and voice use the local path by default. Optional hosted attachment
-analysis requires operator approval (`ENABLE_HOSTED_MEDIA=true`), no selected
-local model endpoint and per-request consent; see
-[deployment configuration](DEPLOYMENT.md#local-inference-and-media-selection).
+| Path | Contents |
+| --- | --- |
+| `src/`, `public/` | Frontend and public assets |
+| `backend/` | API, authentication, database, tools and backend tests |
+| `ai/` | Source validation, taxonomy and multimodal components with tests |
+| `data/` | Candidate catalogue and source manifests |
+| `docs/`, `reports/` | Contracts, setup details, security notes and recorded evidence |
+| `project-plan.md` | Technical plan and execution ledger |
 
 ## Deployment
 
-[DEPLOYMENT.md](DEPLOYMENT.md) describes the Vercel frontend and PrimeCloud
-Python backend deployment. Its hosted-model configuration describes the
-current implementation, not approval to send private or restricted data.
+The hosted architecture uses **Vercel for the frontend** and **PrimeCloud for FastAPI**. Production frontend requests use the `/api/v1` rewrite in `vercel.json`. Configure environment variables in each provider; ignored local files are not uploaded through Git.
 
-### Deploying frontend to Vercel and backend to PrimeCloud
+A remote backend cannot reach a model on your laptop through its own `127.0.0.1`. Follow [DEPLOYMENT.md](DEPLOYMENT.md) for database, origin, secret and connectivity requirements.
 
-Deploy the Vite frontend to Vercel and the FastAPI backend to PrimeCloud as a
-Python web application. Verify the `/api/v1/*` rewrite target in `vercel.json`
-and the exact Vercel origin in PrimeCloud's `CORS_ORIGINS`. Production uses
-same-origin API routing; `VITE_API_BASE_URL` is a development-only override. See
-[`DEPLOYMENT.md`](./DEPLOYMENT.md) for runtime settings, database requirements,
-health checks, and deploy order. The repository is configured for this
-split deployment; no Docker/Nginx service configuration is included.
-
-## Team
+## Team and acknowledgements
 
 Thanks to everyone contributing to this project:
 
@@ -137,9 +212,8 @@ Thanks to everyone contributing to this project:
 - [@JavaTheHutt-K](https://github.com/JavaTheHutt-K) — backend
 - [@kwisdomk](https://github.com/kwisdomk) — AI/ML
 
+AI coding assistants, including ChatGPT/Codex and GitHub Copilot, supported development and documentation. Runtime generation uses the configured local model or optional hosted provider. Model/source records and outstanding provenance checks are documented in [DATA.md](DATA.md) and the [AI handoff](docs/AI_HANDOFF.md).
+
 ## Contributing
 
-Read [AGENTS.md](AGENTS.md) before contributing. The
-[implementation plan](project-plan.md) records requirements and
-task IDs; section 19 records progress. Proposed paths and features in the plan
-may differ from the current source tree.
+Read [AGENTS.md](AGENTS.md) and the [project plan](project-plan.md) before making changes. Coordinate shared interfaces and tie claims to source evidence, code and recorded results.

@@ -9,6 +9,9 @@ validation tools. Text chat and catalogue tools are implemented. Image and audio
 inputs are present in the interface, but OCR, transcription, source retrieval and
 a complete multimodal answer flow have not been verified.
 
+The dashboard workflow artwork is original inline SVG that illustrates intended
+interactions; it is not a screenshot of actual AI analysis or verified retrieval.
+
 The assistant provides decision support. It does not replace a manufacturer
 manual or a qualified engineer.
 

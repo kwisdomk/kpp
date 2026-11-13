@@ -87,6 +87,71 @@ function productImage(category: string): string {
   return "/products/inverter.svg";
 }
 
+function WorkflowIllustration({ kind }: { kind: "question" | "photo" | "evidence" }) {
+  const label = kind === "question" ? "COPILOT CHAT" : kind === "photo" ? "IMAGE INPUT" : "SOURCE VIEW";
+
+  return (
+    <svg className={`workflow-illustration workflow-illustration-${kind}`} viewBox="0 0 360 168" aria-hidden="true">
+      <rect x="24" y="12" width="312" height="144" rx="9" fill="#122842" stroke="#9fc4e8" strokeOpacity=".42" />
+      <path d="M24 38h312" stroke="#9fc4e8" strokeOpacity=".28" />
+      <circle cx="40" cy="25" r="3" fill="#f3a761" />
+      <circle cx="51" cy="25" r="3" fill="#a5c4e2" fillOpacity=".62" />
+      <circle cx="62" cy="25" r="3" fill="#a5c4e2" fillOpacity=".62" />
+      <text x="78" y="28" fill="#bad1e6" fontFamily="monospace" fontSize="7" letterSpacing="1.1">{label}</text>
+
+      {kind === "question" && (
+        <g>
+          <rect x="157" y="50" width="153" height="22" rx="7" fill="#234365" stroke="#8eb7df" strokeOpacity=".3" />
+          <path d="M169 60h100m-100 6h72" stroke="#d8e6f4" strokeOpacity=".74" strokeWidth="2" strokeLinecap="round" />
+          <circle cx="43" cy="91" r="8" fill="#e87920" fillOpacity=".2" stroke="#f3a761" strokeOpacity=".8" />
+          <path d="M40 91h6m-3-3v6" stroke="#ffc27f" strokeWidth="1.2" strokeLinecap="round" />
+          <rect x="58" y="80" width="250" height="39" rx="7" fill="#1a3552" stroke="#8eb7df" strokeOpacity=".38" />
+          <path d="M71 92h188m-188 7h152" stroke="#e1ebf5" strokeOpacity=".62" strokeWidth="2" strokeLinecap="round" />
+          <rect x="71" y="108" width="82" height="7" rx="3.5" fill="#f3a761" fillOpacity=".2" />
+          <circle cx="78" cy="111.5" r="1.5" fill="#ffc27f" />
+          <path d="M58 139h174" stroke="#9fc4e8" strokeOpacity=".5" strokeWidth="2" strokeLinecap="round" />
+          <circle cx="306" cy="139" r="9" fill="#f3a761" />
+          <path d="m303 139 2 2 4-5" fill="none" stroke="#17304c" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+        </g>
+      )}
+
+      {kind === "photo" && (
+        <g>
+          <rect x="42" y="49" width="128" height="91" rx="5" fill="#193653" stroke="#9fc4e8" strokeOpacity=".45" />
+          <path d="M58 122h96M67 122V93l12-12h43l13 12v29M80 81V68h38v13m-49 20h60" fill="none" stroke="#bfd3e7" strokeOpacity=".72" strokeWidth="1.4" />
+          <circle cx="124" cy="102" r="11" fill="none" stroke="#f3a761" strokeOpacity=".8" strokeWidth="1.3" />
+          <path d="M57 62h12m-12 0v12m98-12h-12m12 0v12m-98 66h12m-12 0v-12m98 12h-12m12 0v-12" fill="none" stroke="#f3a761" strokeWidth="1.6" strokeLinecap="round" />
+          <rect x="188" y="51" width="125" height="73" rx="5" fill="#1a3552" stroke="#9fc4e8" strokeOpacity=".4" />
+          <text x="199" y="66" fill="#ffc27f" fontFamily="monospace" fontSize="6" letterSpacing=".8">NAMEPLATE PHOTO</text>
+          <path d="M199 79h101m-101 9h75m-75 9h91" stroke="#d3e1ee" strokeOpacity=".54" strokeWidth="2" strokeLinecap="round" />
+          <path d="M199 113h51" stroke="#f3a761" strokeOpacity=".78" strokeWidth="2" strokeLinecap="round" />
+          <rect x="188" y="132" width="125" height="13" rx="6.5" fill="#f3a761" fillOpacity=".16" />
+          <circle cx="198" cy="138.5" r="2" fill="#ffc27f" />
+          <path d="M205 138.5h60" stroke="#ffc27f" strokeOpacity=".72" strokeWidth="1.5" strokeLinecap="round" />
+        </g>
+      )}
+
+      {kind === "evidence" && (
+        <g>
+          <path d="M76 48h125l28 28v73H76z" fill="#1a3552" stroke="#9fc4e8" strokeOpacity=".5" />
+          <path d="M201 48v28h28" fill="none" stroke="#9fc4e8" strokeOpacity=".5" />
+          <path d="M93 66h67m-67 8h90" stroke="#d0dfed" strokeOpacity=".52" strokeWidth="2" strokeLinecap="round" />
+          <path d="M93 92h97m-97 8h108m-108 8h81" stroke="#d0dfed" strokeOpacity=".38" strokeWidth="2" strokeLinecap="round" />
+          <rect x="91" y="119" width="100" height="9" rx="3" fill="#f3a761" fillOpacity=".2" />
+          <path d="M93 141h72" stroke="#d0dfed" strokeOpacity=".4" strokeWidth="2" strokeLinecap="round" />
+          <rect x="247" y="66" width="66" height="42" rx="5" fill="#234365" stroke="#9fc4e8" strokeOpacity=".45" />
+          <path d="M258 78h44m-44 7h34" stroke="#e1ebf5" strokeOpacity=".62" strokeWidth="2" strokeLinecap="round" />
+          <rect x="258" y="93" width="30" height="8" rx="4" fill="#f3a761" fillOpacity=".22" />
+          <circle cx="263" cy="97" r="1.5" fill="#ffc27f" />
+          <path d="M229 97h18" stroke="#f3a761" strokeOpacity=".8" strokeWidth="1.5" strokeDasharray="2 3" />
+          <rect x="247" y="118" width="66" height="29" rx="4" fill="#193653" stroke="#9fc4e8" strokeOpacity=".38" />
+          <path d="M257 128h45m-45 8h29" stroke="#d3e1ee" strokeOpacity=".52" strokeWidth="2" strokeLinecap="round" />
+        </g>
+      )}
+    </svg>
+  );
+}
+
 function attachmentKind(file: File): AttachmentKind | null {
   const type = file.type.toLowerCase().split(";", 1)[0];
   if (["image/jpeg", "image/png", "image/webp"].includes(type)) return "image";
@@ -829,6 +894,31 @@ export default function App() {
             <div><h1>Hi {username.split("@")[0]}! 👋</h1><p>Ask me about our industrial equipment,<br />get recommendations, or find technical specs.</p><button onClick={openChat}>Continue your chat <ArrowUp size={14} /></button></div>
             <div className="welcome-checks"><span>● Trusted Information</span><span>● Source Citations</span><span>● Role-Based Access</span></div>
           </section>
+          {activeNav === "Dashboard" && (
+            <section className="copilot-workflow" aria-label="Product Copilot workflow">
+              <div className="workflow-heading">
+                <div>
+                  <p className="workflow-kicker">PRODUCT COPILOT · AT A GLANCE</p>
+                  <h2>From field question to source evidence</h2>
+                </div>
+                <span>INTERFACE WORKFLOW</span>
+              </div>
+              <div className="workflow-cards">
+                <article className="workflow-card">
+                  <WorkflowIllustration kind="question" />
+                  <div className="workflow-card-copy"><strong>Ask a field question</strong><span>Start with equipment or product context.</span></div>
+                </article>
+                <article className="workflow-card">
+                  <WorkflowIllustration kind="photo" />
+                  <div className="workflow-card-copy"><strong>Share equipment context</strong><span>Attach a nameplate photo or voice note.</span></div>
+                </article>
+                <article className="workflow-card">
+                  <WorkflowIllustration kind="evidence" />
+                  <div className="workflow-card-copy"><strong>Follow the evidence</strong><span>Review citations returned with an answer.</span></div>
+                </article>
+              </div>
+            </section>
+          )}
           <div className="dashboard-grid dashboard-products-only">
             <section className="dashboard-card recommendations-card">
               <div className="recommendation-heading">

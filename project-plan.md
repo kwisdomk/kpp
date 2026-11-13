@@ -1745,6 +1745,22 @@ are pending. Next: B reviews schema and authorization; A verifies PDF provenance
   passed. B/F review of the retry/auth combination remains requested through
   PR #4; no browser/deployment verification or owner approval is claimed.
 
+### A-12 README setup and usage refresh — 13 November 2026
+
+- Scope: documentation only, based on merged `main@a0db493` in isolated branch
+  `feature/ai-readme-usage`. Frozen checkpoint `826682a` remains unchanged.
+- Reorganized `README.md` around purpose, users, hackathon, prerequisites,
+  installation, environment files, local model authentication, startup, usage,
+  checks, limitations, deployment and credits. Kept exact runtime variable names
+  and separated default local media from optional hosted processing.
+- Verified claims against current source, env examples, dependency requirements
+  and recorded handoffs. Python static link/fence/conflict checks: 14 relative
+  links resolve, 20 fence delimiters balanced, no conflict markers.
+  `git diff --check` passed. Startup and application suites were not rerun for
+  this documentation change; no new runtime/model/evaluation result claimed.
+- Changed paths: `README.md` and this ledger. No API/schema/ACL/benchmark change
+  or blocked upstream contract. Next: team review of public setup instructions.
+
 ### Suggested coordination checklist per PR
 
 - [ ] I read `AGENTS.md`, master plan and latest relevant contracts.

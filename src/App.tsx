@@ -22,6 +22,10 @@ import {
   X,
 } from "lucide-react";
 import "./App.css";
+import { audioToWav } from "./media";
+import ErrorPage from "./components/ErrorPage";
+import { accessErrorForStatus, ApiError, isWorkspaceRole } from "./errorStates";
+import type { ErrorKind } from "./errorStates";
 
 const API_BASE =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080/api/v1";
@@ -32,6 +36,8 @@ const SESSION_LENGTH = 7 * 24 * 60 * 60 * 1000;
 type Role = "engineer" | "customer";
 type Citation = {
   source_id?: string;
+  page?: number | null;
+  excerpt?: string | null;
   title?: string;
   url?: string;
   snippet?: string;
@@ -42,6 +48,16 @@ type Message = {
   content: string;
   files?: string[];
   citations?: Citation[];
+  warnings?: string[];
+  confidence?: string;
+  tool_executed?: string;
+  media_summary?: string;
+  comparison?: ComparisonResult;
+};
+type ComparisonResult = {
+  products: { id: number; [field: string]: unknown }[];
+  fields: string[];
+  different_fields: string[];
 };
 type Conversation = { id: string; title: string; updatedAt?: string };
 type Session = { token: string; expiresAt: number };
@@ -79,10 +95,12 @@ async function api<T>(
   });
 
   if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new Error(detail || `Request failed (${response.status})`);
+    const body: unknown = await response.json().catch(() => null);
+    const detail = body && typeof body === "object" && "detail" in body ? body.detail : null;
+    throw new ApiError(response.status, typeof detail === "string" ? detail : `Request failed (${response.status})`);
   }
 
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -97,14 +115,87 @@ function readSession(): Session | null {
   return null;
 }
 
+function ChatMessages({ messages, busy }: { messages: Message[]; busy: boolean }) {
+  return (
+    <div className="chat-messages" role="log" aria-label="Conversation">
+      {messages.map((message) => (
+        <article className="chat-message" key={message.id}>
+          <b>{message.role === "user" ? "You" : "Copilot"}</b>
+          <p>{message.comparison
+            ? message.content.split("\n").filter((line) => !line.trimStart().startsWith("|")).join("\n")
+            : message.content}</p>
+          {message.comparison && <ComparisonTable comparison={message.comparison} />}
+          {message.media_summary && <p>{message.media_summary}</p>}
+          {message.warnings && message.warnings.length > 0 && (
+            <ul className="chat-warnings" aria-label="Answer warnings">
+              {message.warnings.map((warning, index) => <li key={index}>{warning}</li>)}
+            </ul>
+          )}
+          {message.confidence && <p className="panel-muted">Confidence: {message.confidence}</p>}
+          {message.tool_executed && (
+            <details className="chat-sources">
+              <summary>Tool trace</summary>
+              <p>{message.tool_executed}</p>
+            </details>
+          )}
+          {message.citations && message.citations.length > 0 && (
+            <details className="chat-sources">
+              <summary>Sources ({message.citations.length})</summary>
+              <ul>
+                {message.citations.map((citation, index) => (
+                  <li key={`${citation.source_id}-${index}`}>
+                    <b>{citation.source_id || citation.title || "Source"}</b>
+                    {citation.page != null && <span> · Page {citation.page}</span>}
+                    {(citation.excerpt || citation.snippet) && <p>{citation.excerpt || citation.snippet}</p>}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </article>
+      ))}
+      {busy && <p role="status">Waiting for the assistant…</p>}
+    </div>
+  );
+}
+
+function ComparisonTable({ comparison }: { comparison: ComparisonResult }) {
+  const labels: Record<string, string> = {
+    id: "Catalogue ID", name: "Product", category: "Category", model_number: "Model",
+    specifications: "Stored specifications", price_ksh: "Catalogue price (KES)",
+  };
+  function cell(field: string, value: unknown): string {
+    if (value == null || value === "") return "Not available";
+    if (field === "price_ksh" && typeof value === "number" && Number.isFinite(value)) return formatPrice(value);
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+    return "Not available";
+  }
+  return (
+    <div className="chat-comparison" role="region" aria-label="Catalogue comparison table" tabIndex={0}>
+      <table>
+        <caption>Synthetic demo catalogue comparison. Highlighted rows contain different stored values.</caption>
+        <thead><tr><th scope="col">Field</th>{comparison.products.map((product) => (
+          <th scope="col" key={product.id}>{cell("model_number", product.model_number)}</th>
+        ))}</tr></thead>
+        <tbody>{comparison.fields.map((field) => {
+          const differs = comparison.different_fields.includes(field);
+          return <tr key={field} className={differs ? "comparison-difference" : undefined}>
+            <th scope="row">{labels[field] || field}{differs && <span className="comparison-marker">Different</span>}</th>
+            {comparison.products.map((product) => <td key={product.id}>{cell(field, product[field])}</td>)}
+          </tr>;
+        })}</tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState<Session | null>(readSession);
-  const [role, setRole] = useState<Role | null>(() => {
-    const savedRole = localStorage.getItem(ROLE_KEY);
-    return savedRole === "engineer" || savedRole === "customer" ? savedRole : null;
-  });
+  const [role, setRole] = useState<Role | null>(null);
+  const [verifiedToken, setVerifiedToken] = useState<string | null>(null);
+  const [accessError, setAccessError] = useState<ErrorKind | null>(null);
   const [selectedRole, setSelectedRole] = useState<Role>("engineer");
-  const [activeNav, setActiveNav] = useState("Dashboard");
+  const [activeNav, setActiveNav] = useState(window.location.pathname.replace(/\/+$/, "") === "/chat" ? "Chat Assistant" : "Dashboard");
   const [productPage, setProductPage] = useState(0);
   const [products, setProducts] = useState<Product[]>([]);
   const [catalogLoaded, setCatalogLoaded] = useState(false);
@@ -124,12 +215,25 @@ export default function App() {
   const fileInput = useRef<HTMLInputElement>(null);
   const recorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
+  const requestController = useRef<AbortController | null>(null);
 
   const logout = useCallback(() => {
+    requestController.current?.abort();
+    requestController.current = null;
+    setBusy(false);
+    if (recorder.current) {
+      recorder.current.onstop = null;
+      if (recorder.current.state !== "inactive") recorder.current.stop();
+      recorder.current.stream.getTracks().forEach((track) => track.stop());
+    }
+    setRecording(false);
+    setFiles([]);
     localStorage.removeItem(SESSION_KEY);
     localStorage.removeItem(ROLE_KEY);
     setSession(null);
     setRole(null);
+    setVerifiedToken(null);
+    setAccessError(null);
     setMessages([]);
     setConversationId("");
     setProducts([]);
@@ -137,20 +241,58 @@ export default function App() {
     setCatalogError("");
   }, []);
 
+  const handleRequestError = useCallback((failure: unknown) => {
+    if (!(failure instanceof ApiError)) return;
+    const kind = accessErrorForStatus(failure.status);
+    if (!kind) return;
+    if (kind === "session_expired") logout();
+    setAccessError(kind);
+  }, [logout]);
+
+  useEffect(() => {
+    if (!session) return;
+    const controller = new AbortController();
+    api<{ role?: unknown; username?: unknown }>("/auth/me", session.token, { signal: controller.signal })
+      .then((identity) => {
+        if (controller.signal.aborted) return;
+        const trustedRole = isWorkspaceRole(identity.role) ? identity.role : null;
+        setRole(trustedRole);
+        setVerifiedToken(session.token);
+        if (typeof identity.username === "string") setUsername(identity.username);
+        if (trustedRole) localStorage.setItem(ROLE_KEY, trustedRole);
+        else localStorage.removeItem(ROLE_KEY);
+      })
+      .catch((failure: unknown) => {
+        if (controller.signal.aborted) return;
+        if (failure instanceof ApiError && accessErrorForStatus(failure.status)) handleRequestError(failure);
+        else setAccessError("unavailable");
+      });
+    return () => controller.abort();
+  }, [session, handleRequestError]);
+
   useEffect(() => {
     if (!session) return;
     const remaining = session.expiresAt - Date.now();
-    const timer = window.setTimeout(logout, Math.max(remaining, 0));
+    const timer = window.setTimeout(() => {
+      logout();
+      setAccessError("session_expired");
+    }, Math.max(remaining, 0));
     return () => window.clearTimeout(timer);
   }, [session, logout]);
 
   useEffect(() => {
     if (!session || !role) return;
-    api<Conversation[]>("/conversations", session.token).catch((e) => setError(e.message));
-  }, [session, role]);
+    const controller = new AbortController();
+    api<Conversation[]>("/conversations", session.token, { signal: controller.signal }).catch((failure: unknown) => {
+      if (controller.signal.aborted) return;
+      handleRequestError(failure);
+      setError(failure instanceof Error ? failure.message : "History is unavailable.");
+    });
+    return () => controller.abort();
+  }, [session, role, handleRequestError]);
 
   useEffect(() => {
-    if (!session) return;
+    if (!session || !role) return;
     let active = true;
     api<Product[]>("/catalogue/products", session.token)
       .then((catalogue) => {
@@ -162,6 +304,7 @@ export default function App() {
       })
       .catch((e: unknown) => {
         if (active) {
+          handleRequestError(e);
           setCatalogError(
             e instanceof Error ? e.message : "Product catalogue is unavailable.",
           );
@@ -171,7 +314,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [session]);
+  }, [session, role, handleRequestError]);
 
   async function signIn(event: React.FormEvent) {
     event.preventDefault();
@@ -188,12 +331,14 @@ export default function App() {
         expiresAt: Date.now() + SESSION_LENGTH,
       };
       localStorage.setItem(SESSION_KEY, JSON.stringify(nextSession));
-      localStorage.setItem(ROLE_KEY, selectedRole);
+      localStorage.removeItem(ROLE_KEY);
       setProducts([]);
       setCatalogLoaded(false);
       setCatalogError("");
       setSession(nextSession);
-      setRole(selectedRole);
+      setRole(null);
+      setVerifiedToken(null);
+      setAccessError(null);
     } catch (e) {
       setLoginError(e instanceof Error ? e.message : "Unable to sign in.");
     } finally {
@@ -205,6 +350,17 @@ export default function App() {
     setConversationId("");
     setMessages([]);
     setError("");
+  }
+
+  async function signInAgain() {
+    // Attempt server revocation; always clear this browser's protected state.
+    try {
+      if (session) await api<void>("/auth/logout", session.token, { method: "POST" });
+    } catch {
+      // A failed connection cannot guarantee server revocation; local access ends.
+    } finally {
+      logout();
+    }
   }
 
   function chooseRole(nextRole: Role) {
@@ -224,6 +380,7 @@ export default function App() {
   }
 
   async function toggleRecording() {
+    if (busy) return;
     if (recording) {
       recorder.current?.stop();
       setRecording(false);
@@ -240,6 +397,8 @@ export default function App() {
         if (event.data.size) audioChunks.current.push(event.data);
       };
       mediaRecorder.onstop = () => {
+        window.clearTimeout(stopTimer);
+        setRecording(false);
         const audio = new File(
           [new Blob(audioChunks.current, { type: mediaRecorder.mimeType })],
           `recording-${Date.now()}.webm`,
@@ -250,6 +409,9 @@ export default function App() {
       };
 
       mediaRecorder.start();
+      const stopTimer = window.setTimeout(() => {
+        if (mediaRecorder.state === "recording") mediaRecorder.stop();
+      }, 60_000);
       setRecording(true);
     } catch {
       setError("Microphone access was unavailable. Check browser permissions.");
@@ -258,9 +420,11 @@ export default function App() {
 
   async function sendMessage(event?: React.FormEvent) {
     event?.preventDefault();
-    if (!session || !role || busy || (!prompt.trim() && files.length === 0)) return;
-    if (files.length > 0) {
-      setError("Image, audio, and document analysis is not connected yet. Remove attachments and send a text question.");
+    if (!session || !role || busy || recording || (!prompt.trim() && files.length === 0)) return;
+    if (files.length > 2 || files.filter((file) => file.type.startsWith("image/")).length > 1 ||
+        files.filter((file) => file.type.startsWith("audio/")).length > 1 ||
+        files.some((file) => !file.type.startsWith("image/") && !file.type.startsWith("audio/"))) {
+      setError("Attach at most one photo and one audio recording. Documents are not supported here yet.");
       return;
     }
 
@@ -268,27 +432,52 @@ export default function App() {
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
-      content: text,
+      content: text || "Photo / spoken question",
+      files: files.map((file) => file.name),
     };
 
     setMessages((current) => [...current, userMessage]);
-    setPrompt("");
     setError("");
     setBusy(true);
 
+    const controller = new AbortController();
+    requestController.current = controller;
     try {
+      const mediaIds: string[] = [];
+      for (const file of files) {
+        if (file.size > 8 * 1024 * 1024) throw new Error("Each attachment must be at most 8 MiB.");
+        const audio = file.type.startsWith("audio/");
+        const upload = new FormData();
+        upload.append("file", audio ? await audioToWav(file) : file);
+        if (controller.signal.aborted) return;
+        const media = await api<{ id: string }>(`/media?kind=${audio ? "audio" : "image"}`, session.token, {
+          method: "POST", body: upload, signal: controller.signal,
+        });
+        mediaIds.push(media.id);
+      }
       const result = await api<{
         answer: string;
         conversation_id?: string;
         citations?: Citation[];
+        warnings?: string[];
+        confidence?: string;
+        tool_executed?: string;
+        structured_results?: {
+          comparison?: ComparisonResult;
+          transcription?: { text: string } | null;
+          identification?: { candidates: { model_number: string }[] } | null;
+        };
       }>("/chat/query", session.token, {
         method: "POST",
+        signal: controller.signal,
         body: JSON.stringify({
-          query: text,
+          query: text || undefined,
+          media_ids: mediaIds,
           conversation_id: conversationId || undefined,
         }),
       });
 
+      if (controller.signal.aborted) return;
       if (result.conversation_id) setConversationId(result.conversation_id);
       setMessages((current) => [
         ...current,
@@ -297,13 +486,28 @@ export default function App() {
           role: "assistant",
           content: result.answer,
           citations: result.citations ?? [],
+          warnings: result.warnings ?? [],
+          confidence: result.confidence,
+          tool_executed: result.tool_executed,
+          comparison: result.structured_results?.comparison,
+          media_summary: [
+            result.structured_results?.transcription && `Heard: ${result.structured_results.transcription.text || "No speech transcribed"}`,
+            result.structured_results?.identification && `Photo candidates: ${result.structured_results.identification.candidates.map((candidate) => candidate.model_number).join(", ") || "None identified"}`,
+          ].filter(Boolean).join(" · "),
         },
       ]);
+      setFiles([]);
+      setPrompt("");
 
     } catch (e) {
+      if (controller.signal.aborted) return;
+      handleRequestError(e);
       setError(e instanceof Error ? e.message : "Message could not be sent.");
     } finally {
-      setBusy(false);
+      if (requestController.current === controller) {
+        requestController.current = null;
+        setBusy(false);
+      }
     }
 
   }
@@ -311,14 +515,31 @@ export default function App() {
   const pageDetails: Record<string, { title: string; description: string }> = {
     "Chat Assistant": { title: "Chat Assistant", description: "Ask Jenga Copilot about equipment, specifications, and technical documentation." },
     "Browse Products": { title: "Browse Products", description: "Explore equipment and find the right solution for your project." },
-    Documents: { title: "Documents", description: "Access manuals, datasheets, safety guides, and approved documentation." },
+    Documents: { title: "Documents", description: "Source documents are not connected to the application yet." },
     "Compare Solutions": { title: "Compare Solutions", description: "Compare equipment options side by side before making a decision." },
-    "Upload Media": { title: "Upload Media", description: "Add drawings, images, audio notes, and project files for analysis." },
+    "Upload Media": { title: "Upload Media", description: "Attach one nameplate photo and a spoken question. Approved manual retrieval is pending." },
     History: { title: "History", description: "Review your recent questions, comparisons, and saved recommendations." },
     Settings: { title: "Settings", description: "Manage your workspace preferences and assistant experience." },
   };
   const engineerOnlyPages = new Set(["Compare Solutions", "Upload Media"]);
   const canAccessPage = (page: string) => role === "engineer" || !engineerOnlyPages.has(page);
+
+  if (accessError) {
+    return (
+      <ErrorPage
+        kind={accessError}
+        onSignIn={signInAgain}
+        onReturn={() => {
+          if (accessError === "unavailable") window.location.reload();
+          else if (!session || verifiedToken !== session.token) void signInAgain();
+          else {
+            setAccessError(null);
+            setActiveNav("Dashboard");
+          }
+        }}
+      />
+    );
+  }
 
   if (!session) {
     return (
@@ -380,20 +601,19 @@ export default function App() {
     );
   }
 
-  if (!role) {
+  if (verifiedToken !== session.token) {
     return (
-      <main className="auth-page fallback-role">
-        <section className="auth-card">
-          <h2>Choose your workspace</h2>
-          <p>Select a role to continue.</p>
-          <div className="role-switcher">
-            <button onClick={() => { localStorage.setItem(ROLE_KEY, "engineer"); setRole("engineer"); }}><HardHat size={16} /> Engineer</button>
-            <button onClick={() => { localStorage.setItem(ROLE_KEY, "customer"); setRole("customer"); }}><Users size={16} /> Customer</button>
-          </div>
-          <button onClick={logout}>Sign out</button>
-        </section>
+      <main className="identity-check" role="status" aria-live="polite">
+        <h1>Checking your workspace…</h1>
+        <p>Confirming your account and access with the server.</p>
       </main>
     );
+  }
+
+  if (!role) return <ErrorPage kind="role_required" onSignIn={signInAgain} />;
+
+  if (!canAccessPage(activeNav)) {
+    return <ErrorPage kind="forbidden" onReturn={() => setActiveNav("Dashboard")} onSignIn={signInAgain} />;
   }
 
   return (
@@ -411,7 +631,7 @@ export default function App() {
           <button className={activeNav === "Settings" ? "active" : ""} onClick={() => setActiveNav("Settings")}><Settings size={16} /> Settings</button>
         </nav>
         <button className="sidebar-signout" onClick={logout}><LogOut size={16} /> Sign Out</button>
-        <div className="online-status"><span>●</span><b>Online</b><small>Secure Session</small></div>
+        <div className="online-status status-unknown"><span aria-hidden="true">○</span><b>Status unknown</b><small>Connection not checked</small></div>
       </aside>
       <section className="dashboard-main">
         <header className="dashboard-header">
@@ -425,7 +645,6 @@ export default function App() {
             </div>
         </header>
         <div className={`dashboard-content ${activeNav !== "Dashboard" ? "subpage-active" : ""}`}>
-          {!canAccessPage(activeNav) && <section className="page-panel"><div className="page-panel-heading"><div><p className="page-kicker">ACCESS RESTRICTED</p><h1>Engineer workspace required</h1><p>This resource is available to authenticated engineers only.</p></div><span className="page-panel-icon"><ShieldCheck size={24} /></span></div></section>}
           {canAccessPage(activeNav) && activeNav !== "Dashboard" && (
             <section className="page-panel">
               <div className="page-panel-heading">
@@ -441,9 +660,11 @@ export default function App() {
                   <div className="dashboard-card chat-card">
                     <h2><Bot size={16} /> Start a conversation</h2>
                     <p className="panel-muted">Ask a question below and receive a sourced answer from the copilot.</p>
+                    <ChatMessages messages={messages} busy={busy} />
                     <form onSubmit={sendMessage} className="dashboard-composer standalone-composer">
-                      <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="What would you like to know?" rows={4} />
-                      <div className="composer-actions"><span>Answers include relevant sources where available.</span><button className="send-button" aria-label="Send message"><ArrowUp size={16} /></button></div>
+                      <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="What would you like to know?" aria-label="Your question" rows={4} />
+                      {error && <p className="composer-error" role="alert">{error}</p>}
+                      <div className="composer-actions"><span>Answers include relevant sources where available.</span><button disabled={busy || !prompt.trim()} className="send-button" aria-label="Send message"><ArrowUp size={16} /></button></div>
                     </form>
                   </div>
                   <div className="dashboard-card"><h2><ShieldCheck size={16} /> Copilot guidance</h2><ul className="feature-list"><li>Equipment recommendations</li><li>Technical specifications</li><li>Document and image analysis</li></ul></div>
@@ -483,22 +704,22 @@ export default function App() {
                   )}
                 </>
               )}
-              {activeNav === "Documents" && <div className="document-list">{["Equipment Safety Handbook.pdf", "JCB 3CX Technical Datasheet.pdf", "Site Operations Guide.pdf"].map((item) => <article key={item}><FileText size={22} /><div><b>{item}</b><small>Verified project documentation · PDF</small></div><button><ChevronRight size={15} /></button></article>)}</div>}
-              {activeNav === "Compare Solutions" && <div className="comparison-card dashboard-card"><div className="comparison-toolbar"><span>Selected solutions</span><button className="primary-small">Add product</button></div><div className="comparison-table"><b>Category</b><b>JCB 3CX</b><b>CAT 320</b><span>Equipment type</span><span>Backhoe loader</span><span>Excavator</span><span>Best for</span><span>General construction</span><span>Earthmoving</span></div></div>}
-              {activeNav === "Upload Media" && <div className="upload-panel dashboard-card"><Upload size={30} /><h2>Upload project media</h2><p>Drag files here or choose files from your device. Supported formats include PDF, images, audio, and documents.</p><button className="primary-small" onClick={() => fileInput.current?.click()}>Choose files</button></div>}
+              {activeNav === "Documents" && <div className="dashboard-card"><p className="panel-muted">Document listing is unavailable because source documents are not connected to this page.</p></div>}
+              {activeNav === "Compare Solutions" && <div className="dashboard-card"><p className="panel-muted">No products are selected. Product comparison is not connected to this screen yet.</p></div>}
+              {activeNav === "Upload Media" && <div className="upload-panel dashboard-card"><Upload size={30} /><h2>Upload equipment media</h2><p>Choose one nameplate photo and one audio question, up to 60 seconds. Speech requires a configured local runtime.</p><button className="primary-small" onClick={() => fileInput.current?.click()}>Choose files</button></div>}
               {activeNav === "History" && <div className="history-list dashboard-card"><h2><History size={16} /> Recent activity</h2><p className="panel-muted">Your recent assistant activity will appear here after your first question.</p></div>}
               {activeNav === "Settings" && <div className="settings-list dashboard-card"><h2><Settings size={16} /> Workspace settings</h2><label><span>Workspace notifications</span><input type="checkbox" defaultChecked /></label><label><span>Show source citations</span><input type="checkbox" defaultChecked /></label><label><span>Active role <small>Locked for this session</small></span><strong className="locked-role">{role === "engineer" ? "Engineer" : "Customer"}</strong></label></div>}
             </section>
           )}
           <section className="welcome-banner">
             <div><h1>Hi {username.split("@")[0]}! 👋</h1><p>Ask me about our industrial equipment,<br />get recommendations, or find technical specs.</p><button onClick={newConversation}>Start a new chat <ArrowUp size={14} /></button></div>
-            <div className="welcome-checks"><span>● Trusted Information</span><span>● Source Citations</span><span>● Role-Based Access</span></div>
+            <div className="welcome-checks"><span>Synthetic demo catalogue</span><span>Source document retrieval unavailable</span></div>
           </section>
           <div className="dashboard-grid">
             <section className="dashboard-card chat-card">
               <h2><Bot size={16} /> Chat with Jenga Copilot</h2>
               <div className="chat-preview"><span className="bot-avatar">🤖</span><p>Hello! I can help you find equipment information, compare products, or answer technical questions.<br /><b>What would you like to know?</b></p></div>
-              {messages.length > 0 && <div className="mini-messages">{messages.slice(-2).map((message) => <p key={message.id}><b>{message.role === "user" ? "You" : "Copilot"}:</b> {message.content}</p>)}</div>}
+              <ChatMessages messages={messages} busy={busy} />
               <div className="chat-composer">
           <form
             onSubmit={sendMessage}
@@ -534,16 +755,17 @@ export default function App() {
                 }
               }}
               placeholder="Type your question here..."
+              aria-label="Your question"
               rows={2}
               className="w-full resize-none bg-transparent px-2 py-2 outline-none"
             />
-            {error && <p className="composer-error">{error}</p>}
+            {error && <p className="composer-error" role="alert">{error}</p>}
             <div className="composer-actions">
               <div>
                 <input
                   ref={fileInput}
                   type="file"
-                  accept="image/*,audio/*,.pdf,.txt,.doc,.docx"
+                  accept="image/jpeg,image/png,image/webp,audio/*"
                   multiple
                   className="hidden"
                   onChange={(e) => {
@@ -571,7 +793,7 @@ export default function App() {
                 </button>
               </div>
               <button
-                disabled={busy || (!prompt.trim() && files.length === 0)}
+                disabled={busy || recording || (!prompt.trim() && files.length === 0)}
                 className="send-button"
                 aria-label="Send message"
               >
@@ -600,8 +822,11 @@ export default function App() {
               </div>
             </section>
           </div>
-          <div className="metrics-row">{[["▣", "15+", "Equipment Products"], ["✓", "100%", "Trusted Sources"], ["▥", "60+", "Benchmark Items"], ["▥", "Real-Time", "AI Insights"]].map(([icon, value, label]) => <div className="metric-card" key={label}><span>{icon}</span><b>{value}</b><small>{label}</small></div>)}</div>
-          {messages.length > 0 && <div className="message-history">{messages.map((message) => <article key={message.id}><b>{message.role === "user" ? "You" : "Copilot"}</b><p>{message.content}</p></article>)}</div>}
+          <div className="metrics-row">
+            <div className="metric-card"><b>{catalogLoaded && !catalogError ? products.length : "Unavailable"}</b><small>Catalogue products{catalogError ? ` · ${catalogError}` : " · live API count"}</small></div>
+            <div className="metric-card"><b>Not measured</b><small>Verified source documents</small></div>
+            <div className="metric-card"><b>Not available</b><small>Benchmark results</small></div>
+          </div>
         </div>
       </section>
     </main>

@@ -78,6 +78,10 @@ def test_vercel_build_and_spa_fallback_are_configured() -> None:
     assert config["buildCommand"] == "npm run build"
     assert config["outputDirectory"] == "dist"
     assert config["rewrites"] == [
+        {
+            "source": "/api/v1/:path*",
+            "destination": "https://kpp.primecloud.cloud/api/v1/:path*",
+        },
         {"source": "/(.*)", "destination": "/index.html"}
     ]
 

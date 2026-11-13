@@ -1696,6 +1696,34 @@ are pending. Next: B reviews schema and authorization; A verifies PDF provenance
   Approved sources, canonical ID/specification mapping, complete safety/reviewer
   flow, browser journeys, model provenance and measured evaluation remain open.
 
+### API proxy follow-up and reconciliation handoff - 13 November 2026
+
+- Reconciliation committed locally as `8657a40`. After inspecting the new remote
+  development, included only `origin/fix/vercel-api-proxy@602479e` as cherry-pick
+  `253d8ce`; two files, API rewrite plus its expected configuration test.
+  The rewrite precedes the SPA fallback. Workflow visuals `c46c484` stay separate.
+- Actual focused command after the cherry-pick: same isolated bundled-Python
+  runner as above, `pytest.main(['backend/tests/test_deployment_config.py', '-q',
+  '-p', 'no:cacheprovider', '--tb=short', '--basetemp', work.name+'/pytest'])`:
+  **8 passed in 9.29 s**. No application-source changes after the 162-test suite.
+  No additional full-suite/build rerun was needed for this configuration-only fix.
+- Handoff, conflict decisions, excluded files, review requests, actual results
+  and remaining runtime limits: `docs/reconciliation_handoff.md`.
+  Original snapshot hashes still match. Branch is local; no push, PR,
+  `main`/`dev` merge or deployment is claimed.
+- Final remote refresh retained `main@0d8cb73` and found proxy-branch follow-ups
+  `eba9b5b` and `0ea6ebd`. Included only the production same-origin source fix
+  `0ea6ebd` as `d24a802`; kept the mixed retry/imagery commit separate because its
+  generic error handling needs review against typed auth recovery. Updated
+  README/deployment guidance to match production routing. No remote write.
+- Final frontend check after `d24a802`: `npm run lint` passed; `npm run build`
+  passed, Vite **8.80 s**, with the same scoped low-memory settings plus
+  `VITE_API_BASE_URL=https://routing-check.example.invalid/api/v1`. A search of
+  all emitted JS found no test override hostname, confirming production ignores
+  the development API URL. This is a build/configuration check, not browser or
+  deployed proxy verification. Final whitespace and original-file hash checks
+  passed.
+
 ### Suggested coordination checklist per PR
 
 - [ ] I read `AGENTS.md`, master plan and latest relevant contracts.

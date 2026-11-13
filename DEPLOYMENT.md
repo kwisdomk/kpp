@@ -13,15 +13,13 @@ Create a Vercel project connected to this GitHub repository and configure:
 - Framework preset: Vite
 - Build command: `npm run build`
 - Output directory: `dist`
-- Production and Preview environment variable:
-  `VITE_API_BASE_URL=https://<your-primecloud-backend-domain>/api/v1`
 
-`vercel.json` contains the Vite build/output settings and SPA fallback for
-client-side routes. The API URL must be the full HTTPS PrimeCloud backend URL
-including `/api/v1`; do not include a trailing slash. Set this variable for
-each Vercel environment and redeploy after changing it. Never put database or
-AI-provider secrets in `VITE_*` variables because they are embedded in browser
-assets.
+`vercel.json` sends `/api/v1/*` to
+`https://kpp.primecloud.cloud/api/v1/*` before the SPA fallback. Production builds
+always use the same-origin `/api/v1` path. Update the rewrite destination if the
+backend domain changes; redeploy after changing routing. `VITE_API_BASE_URL`
+remains a development-only override. Never put database or AI-provider secrets
+in `VITE_*` variables because they are embedded in browser assets.
 
 ## PrimeCloud backend
 
@@ -106,8 +104,7 @@ documents, licenses, technical facts, held-out metrics or provider entitlement.
 
 1. Deploy the backend and database on PrimeCloud. Verify
    `https://<backend-domain>/ready` returns `{"status":"ready"}`.
-2. Set `VITE_API_BASE_URL` in Vercel to
-   `https://<backend-domain>/api/v1`.
+2. Verify `vercel.json` points `/api/v1/*` at the active backend domain.
 3. Set the exact Vercel production origin in PrimeCloud's `CORS_ORIGINS`.
 4. Deploy/redeploy the Vercel frontend and test login, catalogue loading, chat,
    and attachment removal.

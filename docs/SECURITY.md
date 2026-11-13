@@ -1,11 +1,14 @@
 # Session and conversation security
 
-Status: local changes tested on 13 November 2026; uncommitted and not deployed.
-Scope: B-03/B-04/B-08/B-10 (§7.4), plus the chat-to-review reference correction.
-This note does not claim complete application security or completion of G2/G5.
-Later catalogue ACL/image handling and native OCR evidence are recorded in the
-[OCR contract](ocr_identification_contract.md). The 79-test result below is the
-earlier session-only checkpoint; the delegated tests have since been reviewed.
+Status checked against repository `main@2675ac9` on 13 November 2026. The session
+work below was merged through PR #4; the original 79-test result is an earlier
+local checkpoint. Later reconciliation evidence is in the
+[reconciliation handoff](reconciliation_handoff.md). Deployed version and
+production security have not been verified by this documentation review.
+
+This is a record of tested controls and open work, not a security certification
+or a claim that G2/G5 are complete. Source-document and vector access controls
+remain incomplete. See the [OCR contract](ocr_identification_contract.md).
 
 ## Enforced behavior
 
@@ -31,19 +34,25 @@ earlier session-only checkpoint; the delegated tests have since been reviewed.
 
 ## Compatibility and cross-role review
 
-No response fields, DB tables or migrations changed. Existing JWTs without the
+In the original session patch, no response fields, DB tables or migrations changed.
+Later reconciliation added account chat history. Existing JWTs without the
 new session binding are rejected: users must log in again. `session_id` remains
 an accepted legacy conversation reference; it must identify an existing owned,
 active conversation. If both reference fields are sent, they must match.
 
-F review requested: use `/auth/me` for displayed identity; call `/auth/logout`
-before clearing local credentials; handle 401/404/409/422 and fresh-login
-requirements. Frontend authentication was deliberately left outside this patch
-and the parallel UI truthfulness task. A review requested: verify trusted-role
-and conversation handling before integrating restricted retrieval. No owner
-approval is recorded here.
+The current frontend calls `/auth/me` to restore the trusted role, clears local
+state and attempts server logout. The reconciliation added owner-bound message
+history and protection against a demoted customer reading earlier engineer
+history. Cross-role owner reviews were requested; no approval is recorded in the
+reconciliation handoff. Browser and deployment behavior still need verification.
 
 ## Verification
+
+The reconciliation handoff records a later **162-test backend suite** with
+isolated SQLite and mocked provider/native boundaries, plus **79 AI tests**.
+Those historical results do not establish live model, browser or deployment
+behavior. See [commands and limits](reconciliation_handoff.md#verification).
+The earlier session-specific run follows for traceability.
 
 `backend/tests/test_session_conversation_security.py` adds **38 regression cases**
 with per-test temporary SQLite databases and blocked provider calls. The initial
@@ -66,19 +75,21 @@ No live model, browser or deployed service was exercised in this security run.
 
 ## Remaining work
 
-- Frontend trusted-role restoration, server logout and expiry UX are not fixed
-  by backend endpoint changes alone.
+- Verify frontend identity restoration, logout and expiry UX in a real browser.
 - Catalogue grants now filter rows before lookup, as documented in the OCR
   contract. Approved restricted documents and document/vector ACLs remain absent.
 - Known demo credentials and development signing-secret defaults remain. Cookie
   Secure/CSRF/CORS configuration, rate limiting and production deployment need
   separate hardening and verification.
-- Images now have bounded decode, metadata removal, owner-bound storage/access,
-  explicit deletion and an OCR endpoint. Audio byte validation/ASR, automatic
-  expired-file cleanup, storage quotas and multimodal chat remain unfinished.
+- Images have bounded decode, metadata removal, owner-bound access and an OCR
+  endpoint. Audio validation, ASR adapters, fusion and account upload quotas are
+  implemented. Native accuracy and browser media journeys remain unverified;
+  automatic local disk reclamation remains incomplete. See
+  [media policy](../DEPLOYMENT.md#local-inference-and-media-selection).
 - Claim/numeric/citation validation, robust adversarial testing, complete failed-
   tool audit logging and calibrated confidence are absent. The review endpoint
-  can now receive an owned chat reference, but reviewer resolution/correction
-  and UI handoff are not complete. Chat history is not stored as messages.
+  can receive an owned chat reference, but reviewer resolution/correction and
+  UI handoff are not complete. Account-bound messages are stored in the database;
+  their production behavior needs verification.
 - The 60-item AI benchmark, model/source approvals and browser/deployment checks
   remain outstanding. Passing these regressions is not a security certification.

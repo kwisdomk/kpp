@@ -23,8 +23,9 @@ import {
 } from "lucide-react";
 import "./App.css";
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
+const API_BASE = import.meta.env.DEV
+  ? import.meta.env.VITE_API_BASE_URL ?? "/api/v1"
+  : "/api/v1";
 const SESSION_KEY = "ai-interface-session";
 const ROLE_KEY = "ai-interface-role";
 const SESSION_LENGTH = 7 * 24 * 60 * 60 * 1000;

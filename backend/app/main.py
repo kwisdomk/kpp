@@ -2,9 +2,14 @@
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-import os
 import logging
+import os
+from pathlib import Path
 
+from dotenv import load_dotenv
+
+BACKEND_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
+load_dotenv(BACKEND_ENV_FILE, override=False)
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
@@ -18,6 +23,29 @@ from app.core.media_limits import MediaUploadLimitMiddleware
 logger = logging.getLogger(__name__)
 
 
+def _cors_origins() -> list[str]:
+    configured_origins = os.getenv("CORS_ORIGINS")
+    if configured_origins is None:
+        if os.getenv("APP_ENV", "").lower() == "production":
+            raise RuntimeError(
+                "CORS_ORIGINS must list the deployed frontend origins in production."
+            )
+        return ["http://localhost:5173", "http://127.0.0.1:5173"]
+
+    origins = [
+        origin.strip().rstrip("/")
+        for origin in configured_origins.split(",")
+        if origin.strip()
+    ]
+    if not origins:
+        raise RuntimeError("CORS_ORIGINS must contain at least one frontend origin.")
+    if os.getenv("APP_ENV", "").lower() == "production" and "*" in origins:
+        raise RuntimeError(
+            "CORS_ORIGINS cannot use '*' in production; list the exact frontend origins."
+        )
+    return origins
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
@@ -28,7 +56,7 @@ app = FastAPI(title="Jenga Consultants Product Copilot", version="1.0.0", lifesp
 app.add_middleware(MediaUploadLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
+    allow_origins=_cors_origins(),
     allow_credentials=False,
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
@@ -51,6 +79,11 @@ app.include_router(reviews.router, prefix="/api/v1")
 @app.get("/health", response_model=HealthResponse, tags=["health"])
 def health() -> HealthResponse:
     return HealthResponse(status="ok", timestamp=datetime.now(timezone.utc))
+
+
+@app.get("/", response_model=HealthResponse, include_in_schema=False)
+def root_health() -> HealthResponse:
+    return health()
 
 
 @app.get("/api/v1/health", response_model=HealthResponse, tags=["health"])

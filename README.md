@@ -28,6 +28,8 @@ From the repository root, create the Python environment and start the backend:
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r backend/requirements.txt
+Copy-Item backend/.env.example backend/.env
+Copy-Item .env.example .env
 $env:PYTHONPATH = "backend"
 python -m uvicorn app.main:app --reload --port 8000
 ```
@@ -36,12 +38,25 @@ In a second terminal, install the frontend dependencies and set the API address:
 
 ```powershell
 npm ci
-$env:VITE_API_BASE_URL = "http://localhost:8000/api/v1"
 npm run dev
 ```
 
 Open the URL printed by Vite. The API address above matches the backend command;
 the frontend's current fallback address uses port 8080.
+
+## Backend
+
+The FastAPI backend is in [`backend/`](./backend). It supports the modular `/api/v1`
+routes described in the project plan, including authentication, sessions, catalogue
+tools, conversations, media validation, chat, and human-review requests.
+The account chat accepts up to two images, PDFs, DOCX, TXT, Markdown, CSV, or voice
+notes per message (8 MiB each). Image/PDF analysis and voice transcription use the
+configured OpenAI API; document text is extracted for NLP analysis. Configure
+`OPENAI_API_KEY` to enable those attachment and voice features. Users must confirm
+they are authorized to send attachments to the configured AI service; do not send
+private or restricted information unless its use with that service is approved.
+Uploaded bytes are deleted after successful processing or removal, and pending
+uploads expire after 24 hours (64 MiB/20 files maximum per account).
 
 Health endpoints:
 
@@ -51,6 +66,11 @@ Health endpoints:
 The backend seeds demo accounts and products. Use them only for development and
 demonstrations. Deployment requires a separate `JENGA_SECRET_KEY`; demo passwords
 are not suitable for a public production service.
+
+The ignored `.env` files are local-only and must never be committed. Use
+`backend/.env.production.example` as a checklist for PrimeCloud production
+settings. Vercel and PrimeCloud do not receive ignored local files from Git;
+configure production values in each provider's environment/secrets settings.
 
 ## Checks
 
@@ -86,26 +106,26 @@ and model revision, checksum and licence records remain incomplete. See the
 The [security note](docs/SECURITY.md) records session enforcement and conversation
 checks, fresh-login requirements, regression evidence and remaining work.
 
+The reconciliation retains upstream account chat history and split hosting.
+Photo and voice use the local path by default. Optional hosted attachment
+analysis requires operator approval (`ENABLE_HOSTED_MEDIA=true`), no selected
+local model endpoint and per-request consent; see
+[deployment configuration](DEPLOYMENT.md#local-inference-and-media-selection).
+
 ## Deployment
 
-[DEPLOYMENT.md](DEPLOYMENT.md) describes the combined Docker deployment for
-PrimeCloud and local containers. Its hosted-model configuration describes the
+[DEPLOYMENT.md](DEPLOYMENT.md) describes the Vercel frontend and PrimeCloud
+Python backend deployment. Its hosted-model configuration describes the
 current implementation, not approval to send private or restricted data.
 
-### Deploying the full application to PrimeCloud
+### Deploying frontend to Vercel and backend to PrimeCloud
 
-Deploy this repository as a **Docker application**, not as a Python-runtime
-application. The root [`Dockerfile`](./Dockerfile) builds the frontend and
-backend together and includes the Nginx configuration and startup script.
-Selecting Python-runtime deployment runs the [`Procfile`](./Procfile) directly
-and bypasses the repository's Nginx configuration, so the bundled Nginx
-permission fix will not apply.
-
-Use the repository root as the build context and `Dockerfile` as the Dockerfile.
-Configure PrimeCloud to expose port `8080`, mount persistent storage at
-`/app/data`, and use `/ready` as the health-check path. See
-[`DEPLOYMENT.md`](./DEPLOYMENT.md) for the full setup and required production
-environment variables.
+Deploy the Vite frontend to Vercel and the FastAPI backend to PrimeCloud as a
+Python web application. Configure `VITE_API_BASE_URL` in Vercel and the exact
+Vercel origin in PrimeCloud's `CORS_ORIGINS`. See
+[`DEPLOYMENT.md`](./DEPLOYMENT.md) for runtime settings, database requirements,
+health checks, and deploy order. The repository is configured for this
+split deployment; no Docker/Nginx service configuration is included.
 
 ## Team
 

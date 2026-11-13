@@ -13,4 +13,13 @@ ALLOWED_AUDIO_TYPES = {"audio/wav", "audio/x-wav", "audio/wave"}
 MAX_IMAGE_PIXELS = 4_000_000
 MAX_IMAGE_EDGE = 4096
 IMAGE_TTL_MINUTES = 60
-MEDIA_STORAGE_DIR = Path(os.getenv("MEDIA_STORAGE_DIR", str(Path(__file__).resolve().parents[3] / "data" / "uploads")))
+MEDIA_STORAGE_DIR = Path(os.getenv("MEDIA_STORAGE_DIR") or str(Path(__file__).resolve().parents[3] / "data" / "uploads"))
+
+HOSTED_AUDIO_TYPES = {"audio/mp4", "audio/mpeg", "audio/webm"}
+ALLOWED_DOCUMENT_TYPES = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "text/csv",
+    "text/markdown",
+    "text/plain",
+}

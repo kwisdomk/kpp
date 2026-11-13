@@ -2,17 +2,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
   Bot,
+  Camera,
   ChevronRight,
   FileArchive,
   FileText,
   HardHat,
   History,
   LayoutDashboard,
-  Image as ImageIcon,
   LogOut,
   Mic,
   Package,
-  Plus,
+  Paperclip,
   Scale,
   Settings,
   ShieldCheck,
@@ -28,12 +28,15 @@ import { accessErrorForStatus, ApiError, isWorkspaceRole } from "./errorStates";
 import type { ErrorKind } from "./errorStates";
 
 const API_BASE =
-  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080/api/v1";
+  import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
 const SESSION_KEY = "ai-interface-session";
 const ROLE_KEY = "ai-interface-role";
 const SESSION_LENGTH = 7 * 24 * 60 * 60 * 1000;
+const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const MAX_CHAT_ATTACHMENTS = 2;
 
 type Role = "engineer" | "customer";
+type AttachmentKind = "image" | "audio" | "document";
 type Citation = {
   source_id?: string;
   page?: number | null;
@@ -46,12 +49,12 @@ type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  files?: string[];
   citations?: Citation[];
   warnings?: string[];
   confidence?: string;
   tool_executed?: string;
   media_summary?: string;
+  attachments?: string[];
   comparison?: ComparisonResult;
 };
 type ComparisonResult = {
@@ -59,7 +62,18 @@ type ComparisonResult = {
   fields: string[];
   different_fields: string[];
 };
-type Conversation = { id: string; title: string; updatedAt?: string };
+type Conversation = { id: string; title: string; status?: string; updatedAt?: string };
+type StoredMessage = Pick<Message, "id" | "role" | "content"> & {
+  created_at: string;
+  metadata?: Pick<Message, "citations" | "warnings" | "confidence" | "tool_executed" | "attachments" | "comparison" | "media_summary">;
+};
+type ChatAttachment = {
+  key: string;
+  file: File;
+  kind: AttachmentKind;
+  mediaId?: string;
+};
+type UploadedMedia = { id: string; filename: string; kind: AttachmentKind };
 type Session = { token: string; expiresAt: number };
 type Product = {
   id: number;
@@ -76,6 +90,33 @@ function formatPrice(priceKsh: number): string {
     currency: "KES",
     maximumFractionDigits: 0,
   }).format(priceKsh);
+}
+
+function productImage(category: string): string {
+  const normalized = category.toLowerCase();
+  if (normalized.includes("generator")) return "/products/generator.svg";
+  if (normalized.includes("transformer")) return "/products/transformer.svg";
+  return "/products/inverter.svg";
+}
+
+function attachmentKind(file: File): AttachmentKind | null {
+  const type = file.type.toLowerCase().split(";", 1)[0];
+  if (["image/jpeg", "image/png", "image/webp"].includes(type)) return "image";
+  if (["audio/wav", "audio/x-wav", "audio/wave", "audio/mpeg", "audio/webm", "audio/mp4"].includes(type)) return "audio";
+  if ([
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "text/csv",
+    "text/markdown",
+    "text/plain",
+  ].includes(type)) return "document";
+  if (type && type !== "application/octet-stream") return null;
+
+  const extension = file.name.toLowerCase().split(".").pop();
+  if (["jpg", "jpeg", "png", "webp"].includes(extension ?? "")) return "image";
+  if (["wav", "mp3", "webm", "m4a"].includes(extension ?? "")) return "audio";
+  if (["pdf", "docx", "txt", "md", "csv"].includes(extension ?? "")) return "document";
+  return null;
 }
 
 async function api<T>(
@@ -126,6 +167,7 @@ function ChatMessages({ messages, busy }: { messages: Message[]; busy: boolean }
             : message.content}</p>
           {message.comparison && <ComparisonTable comparison={message.comparison} />}
           {message.media_summary && <p>{message.media_summary}</p>}
+          {message.attachments?.length ? <p>Attachments: {message.attachments.join(", ")}</p> : null}
           {message.warnings && message.warnings.length > 0 && (
             <ul className="chat-warnings" aria-label="Answer warnings">
               {message.warnings.map((warning, index) => <li key={index}>{warning}</li>)}
@@ -207,13 +249,16 @@ export default function App() {
 
   const [conversationId, setConversationId] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
+  const [chatLoading, setChatLoading] = useState(false);
   const [prompt, setPrompt] = useState("");
-  const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState("");
+  const [files, setFiles] = useState<ChatAttachment[]>([]);
+  const [allowExternalProcessing, setAllowExternalProcessing] = useState(false);
   const [recording, setRecording] = useState(false);
-
   const fileInput = useRef<HTMLInputElement>(null);
+  const cameraInput = useRef<HTMLInputElement>(null);
   const recorder = useRef<MediaRecorder | null>(null);
+  const audioStream = useRef<MediaStream | null>(null);
   const audioChunks = useRef<Blob[]>([]);
   const requestController = useRef<AbortController | null>(null);
 
@@ -234,8 +279,11 @@ export default function App() {
     setRole(null);
     setVerifiedToken(null);
     setAccessError(null);
+    setError("");
     setMessages([]);
     setConversationId("");
+    setChatLoading(false);
+    setFiles([]);
     setProducts([]);
     setCatalogLoaded(false);
     setCatalogError("");
@@ -269,6 +317,14 @@ export default function App() {
       });
     return () => controller.abort();
   }, [session, handleRequestError]);
+  useEffect(() => () => {
+    const activeRecorder = recorder.current;
+    if (activeRecorder?.state === "recording") {
+      activeRecorder.onstop = null;
+      activeRecorder.stop();
+    }
+    audioStream.current?.getTracks().forEach((track) => track.stop());
+  }, []);
 
   useEffect(() => {
     if (!session) return;
@@ -281,15 +337,46 @@ export default function App() {
   }, [session, logout]);
 
   useEffect(() => {
-    if (!session || !role) return;
-    const controller = new AbortController();
-    api<Conversation[]>("/conversations", session.token, { signal: controller.signal }).catch((failure: unknown) => {
-      if (controller.signal.aborted) return;
-      handleRequestError(failure);
-      setError(failure instanceof Error ? failure.message : "History is unavailable.");
-    });
-    return () => controller.abort();
-  }, [session, role, handleRequestError]);
+    if (!session || !role || activeNav !== "Chat Assistant" || conversationId) return;
+    let active = true;
+    const accessToken = session.token;
+
+    async function loadExistingConversation() {
+      setChatLoading(true);
+      try {
+        const conversations = await api<Conversation[]>("/conversations", accessToken);
+        for (const conversation of conversations) {
+          const history = await api<StoredMessage[]>(
+            `/conversations/${encodeURIComponent(conversation.id)}/messages`,
+            accessToken,
+          );
+          if (!active) return;
+          if (history.length === 0 || conversation.status === "finished") continue;
+
+          setConversationId(conversation.id);
+          setMessages(history.map(({ id, role: messageRole, content, metadata }) => ({
+            id,
+            role: messageRole,
+            content,
+            ...metadata,
+          })));
+          break;
+        }
+      } catch (e) {
+        if (active) {
+          handleRequestError(e);
+          setError(e instanceof Error ? e.message : "Could not load your conversation.");
+        }
+      } finally {
+        if (active) setChatLoading(false);
+      }
+    }
+
+    void loadExistingConversation();
+    return () => {
+      active = false;
+    };
+  }, [session, role, activeNav, conversationId, handleRequestError]);
 
   useEffect(() => {
     if (!session || !role) return;
@@ -335,6 +422,10 @@ export default function App() {
       setProducts([]);
       setCatalogLoaded(false);
       setCatalogError("");
+      setConversationId("");
+      setMessages([]);
+      setChatLoading(false);
+      setFiles([]);
       setSession(nextSession);
       setRole(null);
       setVerifiedToken(null);
@@ -346,20 +437,19 @@ export default function App() {
     }
   }
 
-  function newConversation() {
-    setConversationId("");
-    setMessages([]);
+  function openChat() {
+    setActiveNav("Chat Assistant");
     setError("");
   }
 
   async function signInAgain() {
-    // Attempt server revocation; always clear this browser's protected state.
+    const token = session?.token;
+    // Stop active requests and clear protected state before awaiting the server.
+    logout();
     try {
-      if (session) await api<void>("/auth/logout", session.token, { method: "POST" });
+      if (token) await api<void>("/auth/logout", token, { method: "POST" });
     } catch {
-      // A failed connection cannot guarantee server revocation; local access ends.
-    } finally {
-      logout();
+      setLoginError("Signed out on this device. Server session revocation could not be confirmed; retry when connected.");
     }
   }
 
@@ -374,66 +464,112 @@ export default function App() {
     }
   }
 
-  function addFiles(selected: FileList | null) {
-    if (!selected) return;
-    setFiles((current) => [...current, ...Array.from(selected)]);
+  function addFiles(selected: FileList | File[]) {
+    const incoming = Array.from(selected);
+    const accepted: ChatAttachment[] = [];
+    let validationError = "";
+    for (const file of incoming) {
+      const kind = attachmentKind(file);
+      if (!kind) {
+        validationError ||= `${file.name}: unsupported format. Use an image, PDF, DOCX, TXT, Markdown, CSV, or supported audio file.`;
+        continue;
+      }
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        validationError ||= `${file.name}: files must be 8 MiB or smaller.`;
+        continue;
+      }
+      accepted.push({ key: crypto.randomUUID(), file, kind });
+    }
+    const remaining = Math.max(MAX_CHAT_ATTACHMENTS - files.length, 0);
+    if (accepted.length > remaining) {
+      validationError ||= "A chat message can include up to two attachments.";
+    }
+    setFiles((current) => [
+      ...current,
+      ...accepted.slice(0, Math.max(MAX_CHAT_ATTACHMENTS - current.length, 0)),
+    ]);
+    if (accepted.length > 0) setAllowExternalProcessing(false);
+    setError(validationError);
+  }
+
+  async function removeAttachment(attachment: ChatAttachment) {
+    if (attachment.mediaId && session) {
+      try {
+        await api<void>(`/media/${encodeURIComponent(attachment.mediaId)}`, session.token, {
+          method: "DELETE",
+        });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not remove the uploaded attachment.");
+        return;
+      }
+    }
+    setFiles((current) => current.filter((item) => item.key !== attachment.key));
+    setAllowExternalProcessing(false);
   }
 
   async function toggleRecording() {
     if (busy) return;
     if (recording) {
       recorder.current?.stop();
-      setRecording(false);
       return;
     }
-
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setError("This browser does not support microphone recording.");
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      audioStream.current = stream;
+      const preferredType = ["audio/webm", "audio/mp4", "audio/wav"]
+        .find((type) => MediaRecorder.isTypeSupported(type));
+      const mediaRecorder = new MediaRecorder(
+        stream,
+        preferredType ? { mimeType: preferredType } : undefined,
+      );
       recorder.current = mediaRecorder;
       audioChunks.current = [];
-
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size) audioChunks.current.push(event.data);
       };
       mediaRecorder.onstop = () => {
         window.clearTimeout(stopTimer);
         setRecording(false);
+        const contentType = mediaRecorder.mimeType || "audio/webm";
         const audio = new File(
-          [new Blob(audioChunks.current, { type: mediaRecorder.mimeType })],
-          `recording-${Date.now()}.webm`,
-          { type: mediaRecorder.mimeType },
+          [new Blob(audioChunks.current, { type: contentType })],
+          `voice-message-${Date.now()}.${contentType === "audio/mp4" ? "m4a" : "webm"}`,
+          { type: contentType },
         );
-        setFiles((current) => [...current, audio]);
+        addFiles([audio]);
         stream.getTracks().forEach((track) => track.stop());
+        audioStream.current = null;
+        recorder.current = null;
+        setRecording(false);
       };
-
       mediaRecorder.start();
       const stopTimer = window.setTimeout(() => {
         if (mediaRecorder.state === "recording") mediaRecorder.stop();
       }, 60_000);
+      setError("");
       setRecording(true);
-    } catch {
-      setError("Microphone access was unavailable. Check browser permissions.");
+    } catch (e) {
+      setError(e instanceof Error ? `Microphone unavailable: ${e.message}` : "Microphone access was unavailable.");
     }
   }
 
   async function sendMessage(event?: React.FormEvent) {
     event?.preventDefault();
-    if (!session || !role || busy || recording || (!prompt.trim() && files.length === 0)) return;
-    if (files.length > 2 || files.filter((file) => file.type.startsWith("image/")).length > 1 ||
-        files.filter((file) => file.type.startsWith("audio/")).length > 1 ||
-        files.some((file) => !file.type.startsWith("image/") && !file.type.startsWith("audio/"))) {
-      setError("Attach at most one photo and one audio recording. Documents are not supported here yet.");
+    if (!session || !role || busy || recording || chatLoading || (!prompt.trim() && files.length === 0)) return;
+    if (files.some((item) => item.kind === "document") && !allowExternalProcessing) {
+      setError("Confirm you are allowed to send these attachments to the configured AI service.");
       return;
     }
-
     const text = prompt.trim();
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
       content: text || "Photo / spoken question",
-      files: files.map((file) => file.name),
+      attachments: files.map(({ file }) => file.name),
     };
 
     setMessages((current) => [...current, userMessage]);
@@ -443,18 +579,33 @@ export default function App() {
     const controller = new AbortController();
     requestController.current = controller;
     try {
-      const mediaIds: string[] = [];
-      for (const file of files) {
-        if (file.size > 8 * 1024 * 1024) throw new Error("Each attachment must be at most 8 MiB.");
-        const audio = file.type.startsWith("audio/");
-        const upload = new FormData();
-        upload.append("file", audio ? await audioToWav(file) : file);
-        if (controller.signal.aborted) return;
-        const media = await api<{ id: string }>(`/media?kind=${audio ? "audio" : "image"}`, session.token, {
-          method: "POST", body: upload, signal: controller.signal,
+      let activeConversationId = conversationId;
+      if (!activeConversationId) {
+        const conversation = await api<Conversation>("/conversations/current", session.token, {
+          method: "POST",
+          body: JSON.stringify({}),
+          signal: controller.signal,
         });
-        mediaIds.push(media.id);
+        if (controller.signal.aborted) return;
+        activeConversationId = conversation.id;
+        const history = await api<StoredMessage[]>(
+          `/conversations/${encodeURIComponent(activeConversationId)}/messages`,
+          session.token,
+          { signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
+        setConversationId(activeConversationId);
+        setMessages([
+          ...history.map(({ id, role: messageRole, content, metadata }) => ({
+            id,
+            role: messageRole,
+            content,
+            ...metadata,
+          })),
+          userMessage,
+        ]);
       }
+
       const result = await api<{
         answer: string;
         conversation_id?: string;
@@ -472,13 +623,30 @@ export default function App() {
         signal: controller.signal,
         body: JSON.stringify({
           query: text || undefined,
-          media_ids: mediaIds,
-          conversation_id: conversationId || undefined,
+          conversation_id: activeConversationId,
+          media_ids: await Promise.all(files.map(async (attachment) => {
+            if (attachment.mediaId) return attachment.mediaId;
+            const form = new FormData();
+            form.append("file", attachment.kind === "audio" && !allowExternalProcessing ? await audioToWav(attachment.file) : attachment.file);
+            if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
+            const uploaded = await api<UploadedMedia>(
+              `/media?kind=${attachment.kind}`,
+              session.token,
+              { method: "POST", body: form, signal: controller.signal },
+            );
+            setFiles((current) => current.map((item) =>
+              item.key === attachment.key ? { ...item, mediaId: uploaded.id } : item,
+            ));
+            return uploaded.id;
+          })),
+          allow_external_processing: allowExternalProcessing,
         }),
       });
 
       if (controller.signal.aborted) return;
       if (result.conversation_id) setConversationId(result.conversation_id);
+      setFiles([]);
+      setAllowExternalProcessing(false);
       setMessages((current) => [
         ...current,
         {
@@ -502,6 +670,8 @@ export default function App() {
     } catch (e) {
       if (controller.signal.aborted) return;
       handleRequestError(e);
+      setMessages((current) => current.filter((message) => message.id !== userMessage.id));
+      setPrompt(text);
       setError(e instanceof Error ? e.message : "Message could not be sent.");
     } finally {
       if (requestController.current === controller) {
@@ -513,15 +683,15 @@ export default function App() {
   }
 
   const pageDetails: Record<string, { title: string; description: string }> = {
-    "Chat Assistant": { title: "Chat Assistant", description: "Ask Jenga Copilot about equipment, specifications, and technical documentation." },
+    "Chat Assistant": { title: "Chat Assistant", description: "Ask questions by text or voice, and analyze product photos and documents." },
     "Browse Products": { title: "Browse Products", description: "Explore equipment and find the right solution for your project." },
     Documents: { title: "Documents", description: "Source documents are not connected to the application yet." },
     "Compare Solutions": { title: "Compare Solutions", description: "Compare equipment options side by side before making a decision." },
-    "Upload Media": { title: "Upload Media", description: "Attach one nameplate photo and a spoken question. Approved manual retrieval is pending." },
+    "Upload Media": { title: "Upload Media", description: "Add photos, documents, or voice notes directly to your account chat." },
     History: { title: "History", description: "Review your recent questions, comparisons, and saved recommendations." },
     Settings: { title: "Settings", description: "Manage your workspace preferences and assistant experience." },
   };
-  const engineerOnlyPages = new Set(["Compare Solutions", "Upload Media"]);
+  const engineerOnlyPages = new Set<string>();
   const canAccessPage = (page: string) => role === "engineer" || !engineerOnlyPages.has(page);
 
   if (accessError) {
@@ -622,15 +792,15 @@ export default function App() {
         <div className="sidebar-brand"><span className="brand-mark">⚙</span><span>Jenga Consultants<br /><b>Product Copilot</b></span></div>
         <nav className="dashboard-nav">
           <button className={activeNav === "Dashboard" ? "active" : ""} onClick={() => setActiveNav("Dashboard")}><LayoutDashboard size={16} /> Dashboard</button>
-          <button className={activeNav === "Chat Assistant" ? "active" : ""} onClick={() => { setActiveNav("Chat Assistant"); newConversation(); }}><Bot size={16} /> Chat Assistant</button>
+          <button className={activeNav === "Chat Assistant" ? "active" : ""} onClick={openChat}><Bot size={16} /> Chat Assistant</button>
           <button className={activeNav === "Browse Products" ? "active" : ""} onClick={() => setActiveNav("Browse Products")}><Package size={16} /> Browse Products</button>
           <button className={activeNav === "Documents" ? "active" : ""} onClick={() => setActiveNav("Documents")}><FileArchive size={16} /> Documents</button>
-          {role === "engineer" && <button className={activeNav === "Compare Solutions" ? "active" : ""} onClick={() => setActiveNav("Compare Solutions")}><Scale size={16} /> Compare Solutions</button>}
-          {role === "engineer" && <button className={activeNav === "Upload Media" ? "active" : ""} onClick={() => setActiveNav("Upload Media")}><Upload size={16} /> Upload Media</button>}
+          {<button className={activeNav === "Compare Solutions" ? "active" : ""} onClick={() => setActiveNav("Compare Solutions")}><Scale size={16} /> Compare Solutions</button>}
+          {<button className={activeNav === "Upload Media" ? "active" : ""} onClick={() => setActiveNav("Upload Media")}><Upload size={16} /> Upload Media</button>}
           <button className={activeNav === "History" ? "active" : ""} onClick={() => setActiveNav("History")}><History size={16} /> History</button>
           <button className={activeNav === "Settings" ? "active" : ""} onClick={() => setActiveNav("Settings")}><Settings size={16} /> Settings</button>
         </nav>
-        <button className="sidebar-signout" onClick={logout}><LogOut size={16} /> Sign Out</button>
+        <button className="sidebar-signout" onClick={signInAgain}><LogOut size={16} /> Sign Out</button>
         <div className="online-status status-unknown"><span aria-hidden="true">○</span><b>Status unknown</b><small>Connection not checked</small></div>
       </aside>
       <section className="dashboard-main">
@@ -646,7 +816,7 @@ export default function App() {
         </header>
         <div className={`dashboard-content ${activeNav !== "Dashboard" ? "subpage-active" : ""}`}>
           {canAccessPage(activeNav) && activeNav !== "Dashboard" && (
-            <section className="page-panel">
+            <section className={`page-panel ${activeNav === "Chat Assistant" ? "chat-page-panel" : ""}`}>
               <div className="page-panel-heading">
                 <div>
                   <p className="page-kicker">JENGA WORKSPACE</p>
@@ -656,18 +826,116 @@ export default function App() {
                 <span className="page-panel-icon"><Bot size={24} /></span>
               </div>
               {activeNav === "Chat Assistant" && (
-                <div className="page-chat-layout">
-                  <div className="dashboard-card chat-card">
-                    <h2><Bot size={16} /> Start a conversation</h2>
-                    <p className="panel-muted">Ask a question below and receive a sourced answer from the copilot.</p>
-                    <ChatMessages messages={messages} busy={busy} />
-                    <form onSubmit={sendMessage} className="dashboard-composer standalone-composer">
-                      <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="What would you like to know?" aria-label="Your question" rows={4} />
-                      {error && <p className="composer-error" role="alert">{error}</p>}
-                      <div className="composer-actions"><span>Answers include relevant sources where available.</span><button disabled={busy || !prompt.trim()} className="send-button" aria-label="Send message"><ArrowUp size={16} /></button></div>
-                    </form>
+                <div className="account-chat dashboard-card">
+                  <div className="account-chat-heading">
+                    <span className="bot-avatar"><Bot size={18} /></span>
+                    <div><h2>Jenga Product Copilot</h2><p className="panel-muted">Your private, account-bound conversation</p></div>
+                    <span className="chat-account-role">{role}</span>
                   </div>
-                  <div className="dashboard-card"><h2><ShieldCheck size={16} /> Copilot guidance</h2><ul className="feature-list"><li>Equipment recommendations</li><li>Technical specifications</li><li>Document and image analysis</li></ul></div>
+                  <div className="chat-thread" aria-live="polite">
+                    {chatLoading && <p className="panel-muted">Loading your conversation…</p>}
+                    {!chatLoading && messages.length === 0 && (
+                      <div className="chat-empty-state">
+                        <Bot size={24} />
+                        <b>Start a conversation</b>
+                        <span>Ask about products, specifications, or pricing. Your chat will appear here after you send your first message.</span>
+                      </div>
+                    )}
+                    <ChatMessages messages={messages} busy={busy} />
+                  </div>
+                  <form onSubmit={sendMessage} className="dashboard-composer account-chat-composer">
+                    <input
+                      ref={fileInput}
+                      className="chat-file-input"
+                      type="file"
+                      multiple
+                      accept="image/jpeg,image/png,image/webp,.pdf,.docx,.txt,.md,.csv,audio/wav,audio/mpeg,audio/webm,audio/mp4"
+                      onChange={(event) => {
+                        if (event.currentTarget.files) addFiles(event.currentTarget.files);
+                        event.currentTarget.value = "";
+                      }}
+                    />
+                    <input
+                      ref={cameraInput}
+                      className="chat-file-input"
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={(event) => {
+                        if (event.currentTarget.files) addFiles(event.currentTarget.files);
+                        event.currentTarget.value = "";
+                      }}
+                    />
+                    {files.length > 0 && (
+                      <div className="chat-attachment-list" aria-label="Attachments to send">
+                        {files.map(({ key, file, kind, mediaId }) => (
+                          <span className="chat-attachment-chip" key={key}>
+                            {kind === "image" ? <Camera size={14} /> : kind === "audio" ? <Mic size={14} /> : <FileText size={14} />}
+                            <span className="attachment-name">{file.name}</span>
+                            <small>{mediaId ? "Uploaded" : "Ready to upload"}</small>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              aria-label={`Remove ${file.name}`}
+                              onClick={() => void removeAttachment({ key, file, kind, mediaId })}
+                            >
+                              <X size={14} />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <textarea
+                      value={prompt}
+                      onChange={(event) => setPrompt(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && !event.shiftKey) {
+                          event.preventDefault();
+                          void sendMessage();
+                        }
+                      }}
+                      placeholder="Ask about equipment, specifications, or pricing…"
+                      rows={3}
+                      aria-label="Message Jenga Product Copilot"
+                    />
+                    {error && <p className="composer-error" role="alert">{error}</p>}
+                    <div className="chat-attachment-tools">
+                      <button type="button" disabled={busy || files.length >= MAX_CHAT_ATTACHMENTS} onClick={() => fileInput.current?.click()}>
+                        <Paperclip size={15} /> Attach file
+                      </button>
+                      <button type="button" disabled={busy || files.length >= MAX_CHAT_ATTACHMENTS} onClick={() => cameraInput.current?.click()}>
+                        <Camera size={15} /> Take photo
+                      </button>
+                      <button type="button" disabled={busy || (files.length >= MAX_CHAT_ATTACHMENTS && !recording)} onClick={() => void toggleRecording()} className={recording ? "recording" : ""}>
+                        {recording ? <Square size={14} /> : <Mic size={15} />}
+                        {recording ? "Stop recording" : "Voice note"}
+                      </button>
+                      <small>Images, PDF, DOCX, TXT, MD, CSV, or voice · 8 MiB each · up to 2 files</small>
+                    </div>
+                    {files.length > 0 && (
+                      <label className="attachment-consent">
+                        <input
+                          type="checkbox"
+                          checked={allowExternalProcessing}
+                          onChange={(event) => setAllowExternalProcessing(event.currentTarget.checked)}
+                        />
+                        <span>
+                          Optional hosted analysis: I am authorized to send these files to the configured external AI service. Do not send private or restricted
+                          information unless its use with that service has been approved.
+                        </span>
+                      </label>
+                    )}
+                    <div className="composer-actions">
+                      <span>Account-scoped chat. Photo and voice use local processing by default; hosted analysis requires operator approval and your consent.</span>
+                      <button
+                        disabled={busy || chatLoading || (!prompt.trim() && files.length === 0)}
+                        className="send-button"
+                        aria-label="Send message"
+                      >
+                        <ArrowUp size={16} />
+                      </button>
+                    </div>
+                  </form>
                 </div>
               )}
               {activeNav === "Browse Products" && (
@@ -682,13 +950,19 @@ export default function App() {
                       <div className="catalog-grid">
                         {products.slice(productPage * 4, productPage * 4 + 4).map((product) => (
                           <article className="catalog-card" key={product.id}>
-                            <Package className="product-image" aria-hidden="true" />
+                            <img
+                              className="product-image"
+                              src={productImage(product.category)}
+                              alt={`${product.category} equipment illustration`}
+                            />
                             <div>
                               <small className="product-category">{product.category}</small>
                               <h2>{product.name}</h2>
+                              <p className="product-record-id">Catalogue record #{product.id}</p>
                               <p className="panel-muted">Model: {product.model_number}</p>
                               <strong className="catalog-price">{formatPrice(product.price_ksh)}</strong>
-                              <p>{product.specifications}</p>
+                              <p className="product-specifications">{product.specifications}</p>
+                              <p className="product-image-note">Illustrative category image</p>
                             </div>
                           </article>
                         ))}
@@ -712,108 +986,27 @@ export default function App() {
             </section>
           )}
           <section className="welcome-banner">
-            <div><h1>Hi {username.split("@")[0]}! 👋</h1><p>Ask me about our industrial equipment,<br />get recommendations, or find technical specs.</p><button onClick={newConversation}>Start a new chat <ArrowUp size={14} /></button></div>
+            <div><h1>Hi {username.split("@")[0]}! 👋</h1><p>Ask me about our industrial equipment,<br />get recommendations, or find technical specs.</p><button onClick={openChat}>Continue your chat <ArrowUp size={14} /></button></div>
             <div className="welcome-checks"><span>Synthetic demo catalogue</span><span>Source document retrieval unavailable</span></div>
           </section>
-          <div className="dashboard-grid">
-            <section className="dashboard-card chat-card">
-              <h2><Bot size={16} /> Chat with Jenga Copilot</h2>
-              <div className="chat-preview"><span className="bot-avatar">🤖</span><p>Hello! I can help you find equipment information, compare products, or answer technical questions.<br /><b>What would you like to know?</b></p></div>
-              <ChatMessages messages={messages} busy={busy} />
-              <div className="chat-composer">
-          <form
-            onSubmit={sendMessage}
-            className="dashboard-composer"
-          >
-            {files.length > 0 && (
-              <div className="mb-2 flex flex-wrap gap-2">
-                {files.map((file, index) => (
-                  <span
-                    key={`${file.name}-${index}`}
-                    className="flex max-w-full items-center gap-2 rounded-lg bg-stone-100 px-2.5 py-1.5 text-xs"
-                  >
-                    {file.type.startsWith("image/") ? <ImageIcon size={14} /> : <FileText size={14} />}
-                    <span className="max-w-48 truncate">{file.name}</span>
-                    <button
-                      type="button"
-                      onClick={() => setFiles((current) => current.filter((_, i) => i !== index))}
-                      aria-label={`Remove ${file.name}`}
-                    >
-                      <X size={14} />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void sendMessage();
-                }
-              }}
-              placeholder="Type your question here..."
-              aria-label="Your question"
-              rows={2}
-              className="w-full resize-none bg-transparent px-2 py-2 outline-none"
-            />
-            {error && <p className="composer-error" role="alert">{error}</p>}
-            <div className="composer-actions">
-              <div>
-                <input
-                  ref={fileInput}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,audio/*"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => {
-                    addFiles(e.target.files);
-                    e.currentTarget.value = "";
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => fileInput.current?.click()}
-                  className="rounded-lg p-2 text-stone-600 hover:bg-stone-100"
-                  aria-label="Attach files"
-                  title="Attach files"
-                >
-                  <Plus size={18} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void toggleRecording()}
-                  className={`rounded-lg p-2 hover:bg-stone-100 ${recording ? "text-red-700" : "text-stone-600"}`}
-                  aria-label={recording ? "Stop recording" : "Record audio"}
-                  title={recording ? "Stop recording" : "Record audio"}
-                >
-                  {recording ? <Square size={17} /> : <Mic size={18} />}
-                </button>
-              </div>
-              <button
-                disabled={busy || recording || (!prompt.trim() && files.length === 0)}
-                className="send-button"
-                aria-label="Send message"
-              >
-                <ArrowUp size={18} />
-              </button>
-            </div>
-          </form>
-              </div>
-            </section>
+          <div className="dashboard-grid dashboard-products-only">
             <section className="dashboard-card recommendations-card">
               <div className="recommendation-heading">
                 <div><p className="recommendation-kicker">CURRENT BACKEND CATALOGUE</p><h2>Available Products</h2></div>
                 <button type="button" onClick={() => setActiveNav("Browse Products")}>View All <ChevronRight size={13} /></button>
               </div>
               <p className="recommendation-intro">Products and prices are loaded from the application catalogue.</p>
-              <div className="recommendation-list">
+              <div className="recommendation-list dashboard-products-grid">
                 {products.slice(0, 3).map((product) => (
                   <div className="recommendation" key={product.id}>
-                    <Package className="product-icon" aria-hidden="true" />
-                    <span><b>{product.name}</b><small>{product.model_number} · {formatPrice(product.price_ksh)}</small></span>
+                    <img className="dashboard-product-image" src={productImage(product.category)} alt={`${product.category} equipment illustration`} />
+                    <div className="dashboard-product-details">
+                      <small className="product-category">{product.category}</small>
+                      <b>{product.name}</b>
+                      <small>Catalogue record #{product.id} · Model {product.model_number}</small>
+                      <strong>{formatPrice(product.price_ksh)}</strong>
+                      <p>{product.specifications}</p>
+                    </div>
                   </div>
                 ))}
                 {catalogLoaded && products.length === 0 && (

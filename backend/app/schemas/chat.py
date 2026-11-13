@@ -19,6 +19,7 @@ class ChatQuery(BaseModel):
     session_id: str | None = Field(default=None, min_length=1, max_length=64)
     conversation_id: str | None = Field(default=None, min_length=1, max_length=64)
     media_ids: list[str] = Field(default_factory=list, max_length=2)
+    allow_external_processing: bool = False
     client_request_id: str | None = Field(default=None, min_length=1, max_length=128)
 
     @model_validator(mode="after")

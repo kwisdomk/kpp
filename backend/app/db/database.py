@@ -13,7 +13,8 @@ from datetime import datetime, timezone
 from typing import Generator
 
 from passlib.context import CryptContext
-from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Integer, String, Text, create_engine, inspect, select, text
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Integer, LargeBinary, String, Text, create_engine, inspect, select, text
+from sqlalchemy.dialects.mysql import LONGBLOB
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import ArgumentError, OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -235,6 +236,17 @@ class ConversationDB(Base):
     finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
 
+class ConversationMessageDB(Base):
+    __tablename__ = "conversation_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), index=True, nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(nullable=False)
+
+
 class MediaDB(Base):
     __tablename__ = "media"
 
@@ -246,6 +258,18 @@ class MediaDB(Base):
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class MediaContentDB(Base):
+    __tablename__ = "media_content"
+
+    media_id: Mapped[str] = mapped_column(
+        ForeignKey("media.id"), primary_key=True
+    )
+    content: Mapped[bytes] = mapped_column(
+        LargeBinary().with_variant(LONGBLOB(), "mysql"),
+        nullable=False,
+    )
 
 
 class ReviewRequestDB(Base):

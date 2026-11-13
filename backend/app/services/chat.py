@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.db.database import ProductAccessDB, UserDB
 from app.services.ai import generate_grounded_answer
+from app.services.media import ChatAttachment
 from app.tools.catalog import lookup_products
 from app.tools.safety import safety_notice
 from app.tools.comparison import compare_catalogue
@@ -32,9 +33,10 @@ def _is_restricted_query(query: str) -> bool:
     )
 
 
-def route_query(query: str, user: UserDB, db: Session, *, structured_results: dict | None = None) -> ChatResult:
+def route_query(query: str, user: UserDB, db: Session, *, structured_results: dict | None = None, attachments: list[ChatAttachment] | None = None) -> ChatResult:
     role = user.role
     lowered = query.lower()
+    attachments = attachments or []
     if _is_restricted_query(query) and role == "customer":
         return (
             "I cannot provide internal margins or restricted service manuals.",
@@ -42,6 +44,34 @@ def route_query(query: str, user: UserDB, db: Session, *, structured_results: di
             [],
             ["This request is restricted to authorised Jenga engineers."],
             "high",
+        )
+    if attachments:
+        products = lookup_products(db, user)
+        if db.scalar(select(ProductAccessDB.product_id).where(
+            ProductAccessDB.product_id.in_([product.id for product in products]),
+            ProductAccessDB.access_level == "engineer",
+        ).limit(1)) is not None:
+            raise HTTPException(503, "Restricted catalogue context cannot use hosted attachment processing")
+        answer = generate_grounded_answer(
+            query,
+            role,
+            products,
+            attachments=attachments,
+        )
+        if answer is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Attachment analysis requires OPENAI_API_KEY to be configured.",
+            )
+        return (
+            answer,
+            "openai_assistant",
+            ["Product catalog", *(f"User attachment: {item.filename}" for item in attachments)],
+            [
+                "AI-generated answer; verify important specifications with an authorised consultant.",
+                "Uploaded materials are user-provided and are not independently verified.",
+            ],
+            "medium",
         )
     if re.search(r"\b(compare|comparison|versus|vs)\b", lowered):
         products = lookup_products(db, user)

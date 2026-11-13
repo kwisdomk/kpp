@@ -1641,6 +1641,61 @@ are pending. Next: B reviews schema and authorization; A verifies PDF provenance
   by source rights/technical reviews and the B/A ID/specification mapping
   agreement recorded in `docs/AI_HANDOFF.md`. No pending record was approved.
 
+### Local and upstream reconciliation - 13 November 2026
+
+- User authorized safe commits and reconciliation while preserving newer
+  development. Scope: integration of B-03/B-04/B-05/B-07/B-08/B-10,
+  F-06/F-09/F-10 and existing A-05/A-06/A-07 adapters; no source approval,
+  model loading, benchmark changes, deployment or push.
+- Original checkout remains on `feature/local-e2e-contracts` at `a0fe9ab`.
+  Reconciliation checkout: `Q:\kpp\tmp\reconcile-worktree`, branch
+  `feature/backend-local-reconciliation`. SHA-256 checks confirmed all 74
+  selected original source/test/document files were unchanged during integration.
+- Local snapshot commits: `0b277f2` backend/AI, `d7b3f77` frontend,
+  `bafea83` documentation/plan rename. Incoming main: `0d8cb73`.
+  Fetched again after the user flagged new development; main remained unchanged.
+  The separate API proxy fix and workflow-visual branches were inspected.
+- Preserved upstream split Vercel/Python hosting, env templates, health probes,
+  product illustrations and owner-bound account history. Retained removal of
+  obsolete Docker/Nginx configuration; earlier versions remain in Git history.
+  Preserved local trusted sessions, pre-retrieval catalogue grants, deterministic
+  comparison payloads/tables, recovery views, OCR and local WAV/ASR adapters.
+- Resolved media-policy conflict explicitly: local photo/voice is the default.
+  Hosted processing requires `ENABLE_HOSTED_MEDIA=true`, no `LLM_BASE_URL`,
+  an approved provider/data configuration and request consent. Restricted
+  catalogue context is rejected before hosted loading/transcription. Missing
+  local engines never trigger a hosted fallback. Upstream tests now explicitly
+  opt into their mocked hosted profile and use a decodable image fixture.
+- Reconciled history stores only response-filtered citations plus comparison
+  metadata. Customer history checks server-written audit roles before selecting
+  messages; a demoted engineer account cannot recover its engineer history.
+  Sign Out now attempts server revocation and clears/aborts local state first.
+  Missing document/comparison screens and unmeasured metrics retain honest states.
+- Actual backend command: bundled Python `-B -X utf8 -u -c` runner adding the
+  original `.venv/Lib/site-packages` and isolated checkout's `backend` to imports;
+  temporary SQLite `DATABASE_URL`; removed `LLM_BASE_URL`, `OPENAI_API_KEY` and
+  `ENABLE_HOSTED_MEDIA`; `pytest.main(['backend/tests', '-q', '-p',
+  'no:cacheprovider', '--tb=short', '--basetemp', work.name+'/pytest'])`, engine
+  disposal after the suite: **162 passed in 91.44 s**. Includes seven new
+  integration cases in `backend/tests/test_reconciliation.py`.
+- AI unittest discovery in the isolated checkout with the same existing
+  site-packages: **79 passed in 5.568 s**. Frontend: `npm run lint` passed;
+  `npm run build` passed (Vite **11.35 s**) with scoped
+  `NODE_OPTIONS=--max-old-space-size=384 --v8-pool-size=1` and
+  `RAYON_NUM_THREADS=1`; `node --test tests/frontend_error_states.test.mjs`:
+  **8 passed**. `git diff --check` passed. No live provider/native engine,
+  executed browser, deployed endpoint, WER or held-out accuracy claim.
+- Excluded and preserved in the original checkout: experimental
+  `backend/app/schemas/contracts.py` (unreviewed agreement claims), generation
+  drafts under `jddanswer`, input PDF, standalone Token Lab smoke scripts,
+  temporary runners/logs/DBs, real env files and large model artifacts.
+  Tracked-file checks found no credential-pattern matches or prohibited artifacts.
+- Cross-role review requested: B review history/ACL/hosted gates and table startup;
+  F review combined account-chat/auth/media states and both-role navigation;
+  A review local/hosted boundaries and citation provenance. Reviews remain pending.
+  Approved sources, canonical ID/specification mapping, complete safety/reviewer
+  flow, browser journeys, model provenance and measured evaluation remain open.
+
 ### Suggested coordination checklist per PR
 
 - [ ] I read `AGENTS.md`, master plan and latest relevant contracts.

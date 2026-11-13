@@ -22,6 +22,10 @@ import {
   X,
 } from "lucide-react";
 import "./App.css";
+import { audioToWav } from "./media";
+import ErrorPage from "./components/ErrorPage";
+import { accessErrorForStatus, ApiError, isWorkspaceRole } from "./errorStates";
+import type { ErrorKind } from "./errorStates";
 
 const API_BASE = import.meta.env.DEV
   ? import.meta.env.VITE_API_BASE_URL ?? "/api/v1"
@@ -38,10 +42,11 @@ type Role = "engineer" | "customer";
 type AttachmentKind = "image" | "audio" | "document";
 type Citation = {
   source_id?: string;
+  page?: number | null;
+  excerpt?: string | null;
   title?: string;
   url?: string;
   snippet?: string;
-  excerpt?: string;
 };
 type Message = {
   id: string;
@@ -49,14 +54,21 @@ type Message = {
   content: string;
   citations?: Citation[];
   warnings?: string[];
-  confidence?: "high" | "medium" | "low";
+  confidence?: string;
   tool_executed?: string;
+  media_summary?: string;
   attachments?: string[];
+  comparison?: ComparisonResult;
+};
+type ComparisonResult = {
+  products: { id: number; [field: string]: unknown }[];
+  fields: string[];
+  different_fields: string[];
 };
 type Conversation = { id: string; title: string; status?: string; updatedAt?: string };
 type StoredMessage = Pick<Message, "id" | "role" | "content"> & {
   created_at: string;
-  metadata?: Pick<Message, "citations" | "warnings" | "confidence" | "tool_executed" | "attachments">;
+  metadata?: Pick<Message, "citations" | "warnings" | "confidence" | "tool_executed" | "attachments" | "comparison" | "media_summary">;
 };
 type ChatAttachment = {
   key: string;
@@ -128,6 +140,7 @@ async function api<T>(
   const retryableGet = (requestOptions.method ?? "GET").toUpperCase() === "GET";
   let response: Response;
   for (let attempt = 0; ; attempt += 1) {
+    requestOptions.signal?.throwIfAborted();
     try {
       response = await fetch(`${API_BASE}${path}`, requestOptions);
     } catch (error) {
@@ -158,10 +171,11 @@ async function api<T>(
       response.status >= 500 &&
       !response.headers.get("content-type")?.includes("application/json")
     ) {
-      throw new Error("The service is temporarily unavailable. Please try again shortly.");
+      throw new ApiError(response.status, "The service is temporarily unavailable. Please try again shortly.");
     }
-    const detail = await response.text().catch(() => "");
-    throw new Error(detail || `Request failed (${response.status})`);
+    const body: unknown = await response.json().catch(() => null);
+    const detail = body && typeof body === "object" && "detail" in body ? body.detail : null;
+    throw new ApiError(response.status, typeof detail === "string" ? detail : `Request failed (${response.status})`);
   }
 
   if (response.status === 204) return undefined as T;
@@ -179,14 +193,88 @@ function readSession(): Session | null {
   return null;
 }
 
+function ChatMessages({ messages, busy }: { messages: Message[]; busy: boolean }) {
+  return (
+    <div className="chat-messages" role="log" aria-label="Conversation">
+      {messages.map((message) => (
+        <article className="chat-message" key={message.id}>
+          <b>{message.role === "user" ? "You" : "Copilot"}</b>
+          <p>{message.comparison
+            ? message.content.split("\n").filter((line) => !line.trimStart().startsWith("|")).join("\n")
+            : message.content}</p>
+          {message.comparison && <ComparisonTable comparison={message.comparison} />}
+          {message.media_summary && <p>{message.media_summary}</p>}
+          {message.attachments?.length ? <p>Attachments: {message.attachments.join(", ")}</p> : null}
+          {message.warnings && message.warnings.length > 0 && (
+            <ul className="chat-warnings" aria-label="Answer warnings">
+              {message.warnings.map((warning, index) => <li key={index}>{warning}</li>)}
+            </ul>
+          )}
+          {message.confidence && <p className="panel-muted">Confidence: {message.confidence}</p>}
+          {message.tool_executed && (
+            <details className="chat-sources">
+              <summary>Tool trace</summary>
+              <p>{message.tool_executed}</p>
+            </details>
+          )}
+          {message.citations && message.citations.length > 0 && (
+            <details className="chat-sources">
+              <summary>Sources ({message.citations.length})</summary>
+              <ul>
+                {message.citations.map((citation, index) => (
+                  <li key={`${citation.source_id}-${index}`}>
+                    <b>{citation.source_id || citation.title || "Source"}</b>
+                    {citation.page != null && <span> · Page {citation.page}</span>}
+                    {(citation.excerpt || citation.snippet) && <p>{citation.excerpt || citation.snippet}</p>}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </article>
+      ))}
+      {busy && <p role="status">Waiting for the assistant…</p>}
+    </div>
+  );
+}
+
+function ComparisonTable({ comparison }: { comparison: ComparisonResult }) {
+  const labels: Record<string, string> = {
+    id: "Catalogue ID", name: "Product", category: "Category", model_number: "Model",
+    specifications: "Stored specifications", price_ksh: "Catalogue price (KES)",
+  };
+  function cell(field: string, value: unknown): string {
+    if (value == null || value === "") return "Not available";
+    if (field === "price_ksh" && typeof value === "number" && Number.isFinite(value)) return formatPrice(value);
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+    return "Not available";
+  }
+  return (
+    <div className="chat-comparison" role="region" aria-label="Catalogue comparison table" tabIndex={0}>
+      <table>
+        <caption>Synthetic demo catalogue comparison. Highlighted rows contain different stored values.</caption>
+        <thead><tr><th scope="col">Field</th>{comparison.products.map((product) => (
+          <th scope="col" key={product.id}>{cell("model_number", product.model_number)}</th>
+        ))}</tr></thead>
+        <tbody>{comparison.fields.map((field) => {
+          const differs = comparison.different_fields.includes(field);
+          return <tr key={field} className={differs ? "comparison-difference" : undefined}>
+            <th scope="row">{labels[field] || field}{differs && <span className="comparison-marker">Different</span>}</th>
+            {comparison.products.map((product) => <td key={product.id}>{cell(field, product[field])}</td>)}
+          </tr>;
+        })}</tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState<Session | null>(readSession);
-  const [role, setRole] = useState<Role | null>(() => {
-    const savedRole = localStorage.getItem(ROLE_KEY);
-    return savedRole === "engineer" || savedRole === "customer" ? savedRole : null;
-  });
+  const [role, setRole] = useState<Role | null>(null);
+  const [verifiedToken, setVerifiedToken] = useState<string | null>(null);
+  const [accessError, setAccessError] = useState<ErrorKind | null>(null);
   const [selectedRole, setSelectedRole] = useState<Role>("engineer");
-  const [activeNav, setActiveNav] = useState("Dashboard");
+  const [activeNav, setActiveNav] = useState(window.location.pathname.replace(/\/+$/, "") === "/chat" ? "Chat Assistant" : "Dashboard");
   const [productPage, setProductPage] = useState(0);
   const [products, setProducts] = useState<Product[]>([]);
   const [catalogLoaded, setCatalogLoaded] = useState(false);
@@ -209,12 +297,25 @@ export default function App() {
   const recorder = useRef<MediaRecorder | null>(null);
   const audioStream = useRef<MediaStream | null>(null);
   const audioChunks = useRef<Blob[]>([]);
+  const requestController = useRef<AbortController | null>(null);
 
   const logout = useCallback(() => {
+    requestController.current?.abort();
+    requestController.current = null;
+    setBusy(false);
+    if (recorder.current) {
+      recorder.current.onstop = null;
+      if (recorder.current.state !== "inactive") recorder.current.stop();
+      recorder.current.stream.getTracks().forEach((track) => track.stop());
+    }
+    setRecording(false);
+    setFiles([]);
     localStorage.removeItem(SESSION_KEY);
     localStorage.removeItem(ROLE_KEY);
     setSession(null);
     setRole(null);
+    setVerifiedToken(null);
+    setAccessError(null);
     setError("");
     setMessages([]);
     setConversationId("");
@@ -225,6 +326,34 @@ export default function App() {
     setCatalogError("");
   }, []);
 
+  const handleRequestError = useCallback((failure: unknown) => {
+    if (!(failure instanceof ApiError)) return;
+    const kind = accessErrorForStatus(failure.status);
+    if (!kind) return;
+    if (kind === "session_expired") logout();
+    setAccessError(kind);
+  }, [logout]);
+
+  useEffect(() => {
+    if (!session) return;
+    const controller = new AbortController();
+    api<{ role?: unknown; username?: unknown }>("/auth/me", session.token, { signal: controller.signal })
+      .then((identity) => {
+        if (controller.signal.aborted) return;
+        const trustedRole = isWorkspaceRole(identity.role) ? identity.role : null;
+        setRole(trustedRole);
+        setVerifiedToken(session.token);
+        if (typeof identity.username === "string") setUsername(identity.username);
+        if (trustedRole) localStorage.setItem(ROLE_KEY, trustedRole);
+        else localStorage.removeItem(ROLE_KEY);
+      })
+      .catch((failure: unknown) => {
+        if (controller.signal.aborted) return;
+        if (failure instanceof ApiError && accessErrorForStatus(failure.status)) handleRequestError(failure);
+        else setAccessError("unavailable");
+      });
+    return () => controller.abort();
+  }, [session, handleRequestError]);
   useEffect(() => () => {
     const activeRecorder = recorder.current;
     if (activeRecorder?.state === "recording") {
@@ -237,12 +366,15 @@ export default function App() {
   useEffect(() => {
     if (!session) return;
     const remaining = session.expiresAt - Date.now();
-    const timer = window.setTimeout(logout, Math.max(remaining, 0));
+    const timer = window.setTimeout(() => {
+      logout();
+      setAccessError("session_expired");
+    }, Math.max(remaining, 0));
     return () => window.clearTimeout(timer);
   }, [session, logout]);
 
   useEffect(() => {
-    if (!session || activeNav !== "Chat Assistant" || conversationId) return;
+    if (!session || !role || activeNav !== "Chat Assistant" || conversationId) return;
     let active = true;
     const accessToken = session.token;
 
@@ -256,7 +388,7 @@ export default function App() {
             accessToken,
           );
           if (!active) return;
-          if (history.length === 0) continue;
+          if (history.length === 0 || conversation.status === "finished") continue;
 
           setConversationId(conversation.id);
           setMessages(history.map(({ id, role: messageRole, content, metadata }) => ({
@@ -269,6 +401,7 @@ export default function App() {
         }
       } catch (e) {
         if (active) {
+          handleRequestError(e);
           setError(e instanceof Error ? e.message : "Could not load your conversation.");
         }
       } finally {
@@ -280,10 +413,10 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [session, activeNav, conversationId]);
+  }, [session, role, activeNav, conversationId, handleRequestError]);
 
   useEffect(() => {
-    if (!session) return;
+    if (!session || !role) return;
     let active = true;
     api<Product[]>("/catalogue/products", session.token)
       .then((catalogue) => {
@@ -295,6 +428,7 @@ export default function App() {
       })
       .catch((e: unknown) => {
         if (active) {
+          handleRequestError(e);
           setCatalogError(
             e instanceof Error ? e.message : "Product catalogue is unavailable.",
           );
@@ -304,7 +438,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [session]);
+  }, [session, role, handleRequestError]);
 
   async function signIn(event: React.FormEvent) {
     event.preventDefault();
@@ -321,7 +455,7 @@ export default function App() {
         expiresAt: Date.now() + SESSION_LENGTH,
       };
       localStorage.setItem(SESSION_KEY, JSON.stringify(nextSession));
-      localStorage.setItem(ROLE_KEY, selectedRole);
+      localStorage.removeItem(ROLE_KEY);
       setProducts([]);
       setCatalogLoaded(false);
       setCatalogError("");
@@ -330,7 +464,9 @@ export default function App() {
       setChatLoading(false);
       setFiles([]);
       setSession(nextSession);
-      setRole(selectedRole);
+      setRole(null);
+      setVerifiedToken(null);
+      setAccessError(null);
     } catch (e) {
       setLoginError(e instanceof Error ? e.message : "Unable to sign in.");
     } finally {
@@ -341,6 +477,17 @@ export default function App() {
   function openChat() {
     setActiveNav("Chat Assistant");
     setError("");
+  }
+
+  async function signInAgain() {
+    const token = session?.token;
+    // Stop active requests and clear protected state before awaiting the server.
+    logout();
+    try {
+      if (token) await api<void>("/auth/logout", token, { method: "POST" });
+    } catch {
+      setLoginError("Signed out on this device. Server session revocation could not be confirmed; retry when connected.");
+    }
   }
 
   function chooseRole(nextRole: Role) {
@@ -398,6 +545,7 @@ export default function App() {
   }
 
   async function toggleRecording() {
+    if (busy) return;
     if (recording) {
       recorder.current?.stop();
       return;
@@ -421,6 +569,8 @@ export default function App() {
         if (event.data.size) audioChunks.current.push(event.data);
       };
       mediaRecorder.onstop = () => {
+        window.clearTimeout(stopTimer);
+        setRecording(false);
         const contentType = mediaRecorder.mimeType || "audio/webm";
         const audio = new File(
           [new Blob(audioChunks.current, { type: contentType })],
@@ -434,6 +584,9 @@ export default function App() {
         setRecording(false);
       };
       mediaRecorder.start();
+      const stopTimer = window.setTimeout(() => {
+        if (mediaRecorder.state === "recording") mediaRecorder.stop();
+      }, 60_000);
       setError("");
       setRecording(true);
     } catch (e) {
@@ -443,36 +596,41 @@ export default function App() {
 
   async function sendMessage(event?: React.FormEvent) {
     event?.preventDefault();
-    if (!session || !role || busy || chatLoading || (!prompt.trim() && files.length === 0)) return;
-    if (files.length > 0 && !allowExternalProcessing) {
+    if (!session || !role || busy || recording || chatLoading || (!prompt.trim() && files.length === 0)) return;
+    if (files.some((item) => item.kind === "document") && !allowExternalProcessing) {
       setError("Confirm you are allowed to send these attachments to the configured AI service.");
       return;
     }
-    const text = prompt.trim() || "Please analyze the attached file(s).";
+    const text = prompt.trim();
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
-      content: text,
+      content: text || "Photo / spoken question",
       attachments: files.map(({ file }) => file.name),
     };
 
     setMessages((current) => [...current, userMessage]);
-    setPrompt("");
     setError("");
     setBusy(true);
 
+    const controller = new AbortController();
+    requestController.current = controller;
     try {
       let activeConversationId = conversationId;
       if (!activeConversationId) {
         const conversation = await api<Conversation>("/conversations/current", session.token, {
           method: "POST",
           body: JSON.stringify({}),
+          signal: controller.signal,
         });
+        if (controller.signal.aborted) return;
         activeConversationId = conversation.id;
         const history = await api<StoredMessage[]>(
           `/conversations/${encodeURIComponent(activeConversationId)}/messages`,
           session.token,
+          { signal: controller.signal },
         );
+        if (controller.signal.aborted) return;
         setConversationId(activeConversationId);
         setMessages([
           ...history.map(({ id, role: messageRole, content, metadata }) => ({
@@ -490,21 +648,28 @@ export default function App() {
         conversation_id?: string;
         citations?: Citation[];
         warnings?: string[];
-        confidence?: Message["confidence"];
+        confidence?: string;
         tool_executed?: string;
+        structured_results?: {
+          comparison?: ComparisonResult;
+          transcription?: { text: string } | null;
+          identification?: { candidates: { model_number: string }[] } | null;
+        };
       }>("/chat/query", session.token, {
         method: "POST",
+        signal: controller.signal,
         body: JSON.stringify({
-          query: text,
+          query: text || undefined,
           conversation_id: activeConversationId,
           media_ids: await Promise.all(files.map(async (attachment) => {
             if (attachment.mediaId) return attachment.mediaId;
             const form = new FormData();
-            form.append("file", attachment.file);
+            form.append("file", attachment.kind === "audio" && !allowExternalProcessing ? await audioToWav(attachment.file) : attachment.file);
+            if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
             const uploaded = await api<UploadedMedia>(
               `/media?kind=${attachment.kind}`,
               session.token,
-              { method: "POST", body: form },
+              { method: "POST", body: form, signal: controller.signal },
             );
             setFiles((current) => current.map((item) =>
               item.key === attachment.key ? { ...item, mediaId: uploaded.id } : item,
@@ -515,6 +680,7 @@ export default function App() {
         }),
       });
 
+      if (controller.signal.aborted) return;
       if (result.conversation_id) setConversationId(result.conversation_id);
       setFiles([]);
       setAllowExternalProcessing(false);
@@ -528,15 +694,27 @@ export default function App() {
           warnings: result.warnings ?? [],
           confidence: result.confidence,
           tool_executed: result.tool_executed,
+          comparison: result.structured_results?.comparison,
+          media_summary: [
+            result.structured_results?.transcription && `Heard: ${result.structured_results.transcription.text || "No speech transcribed"}`,
+            result.structured_results?.identification && `Photo candidates: ${result.structured_results.identification.candidates.map((candidate) => candidate.model_number).join(", ") || "None identified"}`,
+          ].filter(Boolean).join(" · "),
         },
       ]);
+      setFiles([]);
+      setPrompt("");
 
     } catch (e) {
+      if (controller.signal.aborted) return;
+      handleRequestError(e);
       setMessages((current) => current.filter((message) => message.id !== userMessage.id));
       setPrompt(text);
       setError(e instanceof Error ? e.message : "Message could not be sent.");
     } finally {
-      setBusy(false);
+      if (requestController.current === controller) {
+        requestController.current = null;
+        setBusy(false);
+      }
     }
 
   }
@@ -544,14 +722,31 @@ export default function App() {
   const pageDetails: Record<string, { title: string; description: string }> = {
     "Chat Assistant": { title: "Chat Assistant", description: "Ask questions by text or voice, and analyze product photos and documents." },
     "Browse Products": { title: "Browse Products", description: "Explore equipment and find the right solution for your project." },
-    Documents: { title: "Documents", description: "Access manuals, datasheets, safety guides, and approved documentation." },
+    Documents: { title: "Documents", description: "Source documents are not connected to the application yet." },
     "Compare Solutions": { title: "Compare Solutions", description: "Compare equipment options side by side before making a decision." },
     "Upload Media": { title: "Upload Media", description: "Add photos, documents, or voice notes directly to your account chat." },
     History: { title: "History", description: "Review your recent questions, comparisons, and saved recommendations." },
     Settings: { title: "Settings", description: "Manage your workspace preferences and assistant experience." },
   };
-  const engineerOnlyPages = new Set(["Compare Solutions", "Upload Media"]);
+  const engineerOnlyPages = new Set<string>();
   const canAccessPage = (page: string) => role === "engineer" || !engineerOnlyPages.has(page);
+
+  if (accessError) {
+    return (
+      <ErrorPage
+        kind={accessError}
+        onSignIn={signInAgain}
+        onReturn={() => {
+          if (accessError === "unavailable") window.location.reload();
+          else if (!session || verifiedToken !== session.token) void signInAgain();
+          else {
+            setAccessError(null);
+            setActiveNav("Dashboard");
+          }
+        }}
+      />
+    );
+  }
 
   if (!session) {
     return (
@@ -613,20 +808,19 @@ export default function App() {
     );
   }
 
-  if (!role) {
+  if (verifiedToken !== session.token) {
     return (
-      <main className="auth-page fallback-role">
-        <section className="auth-card">
-          <h2>Choose your workspace</h2>
-          <p>Select a role to continue.</p>
-          <div className="role-switcher">
-            <button onClick={() => { localStorage.setItem(ROLE_KEY, "engineer"); setRole("engineer"); }}><HardHat size={16} /> Engineer</button>
-            <button onClick={() => { localStorage.setItem(ROLE_KEY, "customer"); setRole("customer"); }}><Users size={16} /> Customer</button>
-          </div>
-          <button onClick={logout}>Sign out</button>
-        </section>
+      <main className="identity-check" role="status" aria-live="polite">
+        <h1>Checking your workspace…</h1>
+        <p>Confirming your account and access with the server.</p>
       </main>
     );
+  }
+
+  if (!role) return <ErrorPage kind="role_required" onSignIn={signInAgain} />;
+
+  if (!canAccessPage(activeNav)) {
+    return <ErrorPage kind="forbidden" onReturn={() => setActiveNav("Dashboard")} onSignIn={signInAgain} />;
   }
 
   return (
@@ -638,13 +832,13 @@ export default function App() {
           <button className={activeNav === "Chat Assistant" ? "active" : ""} onClick={openChat}><Bot size={16} /> Chat Assistant</button>
           <button className={activeNav === "Browse Products" ? "active" : ""} onClick={() => setActiveNav("Browse Products")}><Package size={16} /> Browse Products</button>
           <button className={activeNav === "Documents" ? "active" : ""} onClick={() => setActiveNav("Documents")}><FileArchive size={16} /> Documents</button>
-          {role === "engineer" && <button className={activeNav === "Compare Solutions" ? "active" : ""} onClick={() => setActiveNav("Compare Solutions")}><Scale size={16} /> Compare Solutions</button>}
-          {role === "engineer" && <button className={activeNav === "Upload Media" ? "active" : ""} onClick={() => setActiveNav("Upload Media")}><Upload size={16} /> Upload Media</button>}
+          {<button className={activeNav === "Compare Solutions" ? "active" : ""} onClick={() => setActiveNav("Compare Solutions")}><Scale size={16} /> Compare Solutions</button>}
+          {<button className={activeNav === "Upload Media" ? "active" : ""} onClick={() => setActiveNav("Upload Media")}><Upload size={16} /> Upload Media</button>}
           <button className={activeNav === "History" ? "active" : ""} onClick={() => setActiveNav("History")}><History size={16} /> History</button>
           <button className={activeNav === "Settings" ? "active" : ""} onClick={() => setActiveNav("Settings")}><Settings size={16} /> Settings</button>
         </nav>
-        <button className="sidebar-signout" onClick={logout}><LogOut size={16} /> Sign Out</button>
-        <div className="online-status"><span>●</span><b>Online</b><small>Secure Session</small></div>
+        <button className="sidebar-signout" onClick={signInAgain}><LogOut size={16} /> Sign Out</button>
+        <div className="online-status status-unknown"><span aria-hidden="true">○</span><b>Status unknown</b><small>Connection not checked</small></div>
       </aside>
       <section className="dashboard-main">
         <header className="dashboard-header">
@@ -658,7 +852,6 @@ export default function App() {
             </div>
         </header>
         <div className={`dashboard-content ${activeNav !== "Dashboard" ? "subpage-active" : ""}`}>
-          {!canAccessPage(activeNav) && <section className="page-panel"><div className="page-panel-heading"><div><p className="page-kicker">ACCESS RESTRICTED</p><h1>Engineer workspace required</h1><p>This resource is available to authenticated engineers only.</p></div><span className="page-panel-icon"><ShieldCheck size={24} /></span></div></section>}
           {canAccessPage(activeNav) && activeNav !== "Dashboard" && (
             <section className={`page-panel ${activeNav === "Chat Assistant" ? "chat-page-panel" : ""}`}>
               <div className="page-panel-heading">
@@ -685,39 +878,7 @@ export default function App() {
                         <span>Ask about products, specifications, or pricing. Your chat will appear here after you send your first message.</span>
                       </div>
                     )}
-                    {messages.map((message) => (
-                      <article className={`chat-message ${message.role}`} key={message.id}>
-                        <b>{message.role === "user" ? "You" : "Jenga Product Copilot"}</b>
-                        <p>{message.content}</p>
-                        {message.attachments && message.attachments.length > 0 && (
-                          <ul className="message-attachments">
-                            {message.attachments.map((filename) => <li key={filename}>{filename}</li>)}
-                          </ul>
-                        )}
-                        {message.tool_executed && (
-                          <small className="chat-message-meta">
-                            {message.tool_executed.replaceAll("_", " ")}
-                            {message.confidence && ` · ${message.confidence} confidence`}
-                          </small>
-                        )}
-                        {message.citations && message.citations.length > 0 && (
-                          <ul className="chat-citations">
-                            {message.citations.map((citation, index) => (
-                              <li key={`${citation.source_id ?? citation.title ?? "source"}-${index}`}>
-                                {citation.title ?? citation.source_id ?? "Source"}
-                                {(citation.snippet ?? citation.excerpt) && ` — ${citation.snippet ?? citation.excerpt}`}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                        {message.warnings && message.warnings.length > 0 && (
-                          <ul className="chat-warnings">
-                            {message.warnings.map((warning) => <li key={warning}>{warning}</li>)}
-                          </ul>
-                        )}
-                      </article>
-                    ))}
-                    {busy && <p className="panel-muted chat-thinking">Copilot is preparing a response…</p>}
+                    <ChatMessages messages={messages} busy={busy} />
                   </div>
                   <form onSubmit={sendMessage} className="dashboard-composer account-chat-composer">
                     <input
@@ -796,15 +957,15 @@ export default function App() {
                           onChange={(event) => setAllowExternalProcessing(event.currentTarget.checked)}
                         />
                         <span>
-                          I am authorized to send these files to the configured AI service. Do not send private or restricted
+                          Optional hosted analysis: I am authorized to send these files to the configured external AI service. Do not send private or restricted
                           information unless its use with that service has been approved.
                         </span>
                       </label>
                     )}
                     <div className="composer-actions">
-                      <span>Account-scoped chat. Pending files expire after 24 hours and are removed after processing or removal.</span>
+                      <span>Account-scoped chat. Photo and voice use local processing by default; hosted analysis requires operator approval and your consent.</span>
                       <button
-                        disabled={busy || chatLoading || (!prompt.trim() && files.length === 0) || (files.length > 0 && !allowExternalProcessing)}
+                        disabled={busy || chatLoading || (!prompt.trim() && files.length === 0)}
                         className="send-button"
                         aria-label="Send message"
                       >
@@ -860,16 +1021,16 @@ export default function App() {
                   )}
                 </>
               )}
-              {activeNav === "Documents" && <div className="document-list">{["Equipment Safety Handbook.pdf", "JCB 3CX Technical Datasheet.pdf", "Site Operations Guide.pdf"].map((item) => <article key={item}><FileText size={22} /><div><b>{item}</b><small>Verified project documentation · PDF</small></div><button><ChevronRight size={15} /></button></article>)}</div>}
-              {activeNav === "Compare Solutions" && <div className="comparison-card dashboard-card"><div className="comparison-toolbar"><span>Selected solutions</span><button className="primary-small">Add product</button></div><div className="comparison-table"><b>Category</b><b>JCB 3CX</b><b>CAT 320</b><span>Equipment type</span><span>Backhoe loader</span><span>Excavator</span><span>Best for</span><span>General construction</span><span>Earthmoving</span></div></div>}
-              {activeNav === "Upload Media" && <div className="upload-panel dashboard-card"><Upload size={30} /><h2>Attach media in your chat</h2><p>Open the account chat to upload a product photo or document, take a photo with your camera, or record a voice note for transcription and analysis.</p><button className="primary-small" onClick={openChat}>Open account chat</button></div>}
+              {activeNav === "Documents" && <div className="dashboard-card"><p className="panel-muted">Document listing is unavailable because source documents are not connected to this page.</p></div>}
+              {activeNav === "Compare Solutions" && <div className="dashboard-card"><p className="panel-muted">No products are selected. Product comparison is not connected to this screen yet.</p></div>}
+              {activeNav === "Upload Media" && <div className="upload-panel dashboard-card"><Upload size={30} /><h2>Upload equipment media</h2><p>Choose one nameplate photo and one audio question, up to 60 seconds. Speech requires a configured local runtime.</p><button className="primary-small" onClick={() => fileInput.current?.click()}>Choose files</button></div>}
               {activeNav === "History" && <div className="history-list dashboard-card"><h2><History size={16} /> Recent activity</h2><p className="panel-muted">Your recent assistant activity will appear here after your first question.</p></div>}
               {activeNav === "Settings" && <div className="settings-list dashboard-card"><h2><Settings size={16} /> Workspace settings</h2><label><span>Workspace notifications</span><input type="checkbox" defaultChecked /></label><label><span>Show source citations</span><input type="checkbox" defaultChecked /></label><label><span>Active role <small>Locked for this session</small></span><strong className="locked-role">{role === "engineer" ? "Engineer" : "Customer"}</strong></label></div>}
             </section>
           )}
           <section className="welcome-banner">
             <div><h1>Hi {username.split("@")[0]}! 👋</h1><p>Ask me about our industrial equipment,<br />get recommendations, or find technical specs.</p><button onClick={openChat}>Continue your chat <ArrowUp size={14} /></button></div>
-            <div className="welcome-checks"><span>● Trusted Information</span><span>● Source Citations</span><span>● Role-Based Access</span></div>
+            <div className="welcome-checks"><span>Synthetic demo catalogue</span><span>Source document retrieval unavailable</span></div>
           </section>
           <div className="dashboard-grid dashboard-products-only">
             <section className="dashboard-card recommendations-card">
@@ -908,7 +1069,11 @@ export default function App() {
               </div>
             </section>
           </div>
-          <div className="metrics-row">{[["▣", "15+", "Equipment Products"], ["✓", "100%", "Trusted Sources"], ["▥", "60+", "Benchmark Items"], ["▥", "Real-Time", "AI Insights"]].map(([icon, value, label]) => <div className="metric-card" key={label}><span>{icon}</span><b>{value}</b><small>{label}</small></div>)}</div>
+          <div className="metrics-row">
+            <div className="metric-card"><b>{catalogLoaded && !catalogError ? products.length : "Unavailable"}</b><small>Catalogue products{catalogError ? ` · ${catalogError}` : " · live API count"}</small></div>
+            <div className="metric-card"><b>Not measured</b><small>Verified source documents</small></div>
+            <div className="metric-card"><b>Not available</b><small>Benchmark results</small></div>
+          </div>
         </div>
       </section>
     </main>

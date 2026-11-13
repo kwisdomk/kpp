@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Citation(BaseModel):
@@ -22,9 +22,19 @@ class ChatQuery(BaseModel):
     allow_external_processing: bool = False
     client_request_id: str | None = Field(default=None, min_length=1, max_length=128)
 
+    @model_validator(mode="after")
+    def validate_message(self) -> "ChatQuery":
+        if not self.media_ids:
+            self.resolved_text()
+        elif self.text is not None or self.query is not None:
+            self.resolved_text()
+        if self.conversation_id and self.session_id and self.conversation_id != self.session_id:
+            raise ValueError("conversation_id and legacy session_id must match")
+        return self
+
     def resolved_text(self) -> str:
         value = self.text or self.query
-        if not value:
+        if not value or not value.strip():
             raise ValueError("Either text or query is required")
         return value
 

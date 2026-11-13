@@ -12,6 +12,7 @@ __pycache__/
 *.gguf
 *.bin
 data/index/
+data/uploads/
 
 # Frontend
 logs
@@ -37,3 +38,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local runtime and reconciliation scratch
+/tmp/

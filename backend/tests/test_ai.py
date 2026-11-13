@@ -77,6 +77,7 @@ def test_openai_connection_error_is_reported_as_unavailable(
 def test_openai_response_includes_image_and_document_attachments(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("ENABLE_HOSTED_MEDIA", "true")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     request_data: dict[str, object] = {}
 
@@ -135,6 +136,7 @@ def test_openai_response_includes_image_and_document_attachments(
 
 
 def test_voice_note_is_transcribed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENABLE_HOSTED_MEDIA", "true")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     request_data: dict[str, object] = {}
 

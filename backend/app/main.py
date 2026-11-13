@@ -7,6 +7,9 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+BACKEND_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
+load_dotenv(BACKEND_ENV_FILE, override=False)
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
@@ -15,11 +18,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.api import auth, catalog, chat, conversations, media, reviews
 from app.db.database import engine, init_db
 from app.schemas.common import HealthResponse
+from app.core.media_limits import MediaUploadLimitMiddleware
 
 logger = logging.getLogger(__name__)
-
-BACKEND_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
-load_dotenv(BACKEND_ENV_FILE, override=False)
 
 
 def _cors_origins() -> list[str]:
@@ -52,6 +53,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Jenga Consultants Product Copilot", version="1.0.0", lifespan=lifespan)
+app.add_middleware(MediaUploadLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),

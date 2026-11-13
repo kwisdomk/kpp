@@ -6,23 +6,33 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.db.database import ProductDB, get_db
+from app.auth.security import get_current_user
+from app.db.database import UserDB, get_db
 from app.schemas.catalogue import CompareRequest, CompareResponse, PriceLineItem, PriceRequest, PriceResponse
 from app.schemas.common import ProductResponse
 from app.tools.catalog import lookup_products
+from app.services.authorization import get_authorized_product
+from app.tools.comparison import compare_catalogue
 
-router = APIRouter(prefix="/catalogue", tags=["catalogue"])
-legacy_router = APIRouter(prefix="/catalog", tags=["catalogue"])
+router = APIRouter(prefix="/catalogue", tags=["catalogue"], dependencies=[Depends(get_current_user)])
+legacy_router = APIRouter(prefix="/catalog", tags=["catalogue"], dependencies=[Depends(get_current_user)])
 
 
 @router.get("/products", response_model=list[ProductResponse])
-def list_products(db: Annotated[Session, Depends(get_db)]) -> list[ProductResponse]:
-    return [ProductResponse.model_validate(product, from_attributes=True) for product in lookup_products(db)]
+def list_products(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[UserDB, Depends(get_current_user)],
+) -> list[ProductResponse]:
+    return [ProductResponse.model_validate(product, from_attributes=True) for product in lookup_products(db, current_user)]
 
 
 @router.get("/products/{product_id}", response_model=ProductResponse)
-def get_product(product_id: int, db: Annotated[Session, Depends(get_db)]) -> ProductResponse:
-    product = db.get(ProductDB, product_id)
+def get_product(
+    product_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[UserDB, Depends(get_current_user)],
+) -> ProductResponse:
+    product = get_authorized_product(db, current_user, product_id)
     if product is None:
         raise HTTPException(status_code=404, detail="Product not found")
     return ProductResponse.model_validate(product, from_attributes=True)
@@ -32,13 +42,14 @@ def get_product(product_id: int, db: Annotated[Session, Depends(get_db)]) -> Pro
 def calculate_price(
     payload: PriceRequest,
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[UserDB, Depends(get_current_user)],
 ) -> PriceResponse:
     line_items: list[PriceLineItem] = []
     subtotal = 0
     for product_id, quantity in payload.items:
         if quantity <= 0:
             raise HTTPException(status_code=422, detail="Quantities must be positive")
-        product = db.get(ProductDB, product_id)
+        product = get_authorized_product(db, current_user, product_id)
         if product is None:
             raise HTTPException(status_code=404, detail="Product not found")
         line_total = product.price_ksh * 100 * quantity
@@ -67,19 +78,9 @@ def calculate_price(
 def compare_products(
     payload: CompareRequest,
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[UserDB, Depends(get_current_user)],
 ) -> CompareResponse:
-    products = [db.get(ProductDB, product_id) for product_id in payload.product_ids]
-    if any(product is None for product in products):
-        raise HTTPException(status_code=404, detail="Product not found")
-    fields = payload.fields or ["category", "model_number", "specifications", "price_ksh"]
-    return CompareResponse(
-        products=[
-            {"id": product.id, **{field: getattr(product, field, None) for field in fields}}
-            for product in products
-            if product is not None
-        ],
-        fields=fields,
-    )
+    return compare_catalogue(payload, db, current_user)
 
 
 legacy_router.add_api_route(

@@ -22,7 +22,8 @@ def test_root_health_supports_default_platform_probe() -> None:
 
 def test_catalogue_api_returns_live_backend_products() -> None:
     with TestClient(app) as client:
-        response = client.get("/api/v1/catalogue/products")
+        login = client.post("/auth/login", json={"username": "customer@jenga.com", "password": "customer123"})
+        response = client.get("/api/v1/catalogue/products", headers={"Authorization": f"Bearer {login.json()['access_token']}"})
 
     assert response.status_code == 200
     products = response.json()
@@ -117,6 +118,7 @@ def test_account_chat_reuses_conversation_and_keeps_history_private() -> None:
 
 
 def test_chat_uploads_and_analyzes_owned_document(monkeypatch) -> None:
+    monkeypatch.setenv("ENABLE_HOSTED_MEDIA", "true")
     observed: dict[str, object] = {}
 
     def fake_answer(query, role, products, *, attachments):
@@ -224,6 +226,15 @@ def test_media_upload_rejects_mismatched_image_content() -> None:
 
 
 def test_chat_analyzes_image_and_transcribed_voice_note(monkeypatch) -> None:
+    monkeypatch.setenv("ENABLE_HOSTED_MEDIA", "true")
+    from io import BytesIO
+    import base64
+    from PIL import Image
+
+    image_buffer = BytesIO()
+    with Image.new("RGB", (16, 16), "white") as source:
+        source.save(image_buffer, format="PNG")
+    image_bytes = image_buffer.getvalue()
     observed: dict[str, object] = {}
 
     def fake_transcription(filename, content_type, content):
@@ -251,7 +262,7 @@ def test_chat_analyzes_image_and_transcribed_voice_note(monkeypatch) -> None:
         image = client.post(
             "/api/v1/media?kind=image",
             headers=headers,
-            files={"file": ("equipment.png", b"\x89PNG\r\n\x1a\nimage", "image/png")},
+            files={"file": ("equipment.png", image_bytes, "image/png")},
         )
         voice = client.post(
             "/api/v1/media?kind=audio",
@@ -279,7 +290,7 @@ def test_chat_analyzes_image_and_transcribed_voice_note(monkeypatch) -> None:
     assert response.json()["answer"] == "The image and voice note were analyzed."
     assert observed == {
         "query": "Please analyze the attached file(s).",
-        "image": "data:image/png;base64,iVBORw0KGgppbWFnZQ==",
+        "image": "data:image/png;base64," + base64.b64encode(image_bytes).decode("ascii"),
         "voice_text": "Read the model number on this equipment.",
     }
 

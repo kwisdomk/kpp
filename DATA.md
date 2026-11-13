@@ -3,6 +3,11 @@
 A-01 is IN PROGRESS: **15 candidate products across 3 categories; 0 approved
 products; 0 verified sources**.
 
+The image-identification baseline currently matches the backend's three synthetic
+demo catalogue rows. Its generated nameplate smoke images do not add approved
+equipment data or satisfy the labeled/held-out image minimum. See
+[the OCR contract](docs/ocr_identification_contract.md).
+
 `data/catalogue/products.csv` maps the 15 slots `JC-PMP-001..005`,
 `JC-GEN-001..005` and `JC-INV-001..005`; every row has `verified: false`.
 `data/manifests/source_candidates.json` records the candidate specifications,

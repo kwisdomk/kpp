@@ -1,5 +1,5 @@
 # Jenga Consultants — Product Copilot
-## Implementation plan and team working rules
+## Project plan
 
 **Version:** 1.0 (planning baseline)
 
@@ -9,10 +9,10 @@
 
 **Project:** Jenga Consultants, a **fictional industrial-equipment seller**; Product Copilot is its AI assistant
 
-**Team:** three people — Frontend (F), Backend/Security (B), AI/Data/Evaluation (A)
+**Team:** four people — two Frontend (F), one Backend/Security (B), and one AI/Data/Evaluation (A); check official team eligibility rules
 
-**Hardware:** **ATHENA ONLY** — HP Victus 15, Intel i5-13420H, NVIDIA GeForce RTX 3050 Laptop GPU 6 GB VRAM (diagnostically verified; corrects earlier RTX 4050 planning baseline); previous system RAM reading 8 GB (verify actual installed RAM before model setup). **Do not plan on a ZBook or distributed GPUs.**
-**Status:** Authoritative *design and execution plan*, not evidence of completed implementation. The precise product models, source licenses, installed RAM, tool versions, role-holder names, and results are not yet verified.
+**Hardware:** **ATHENA ONLY** — HP Victus 15, Intel i5-13420H, NVIDIA GeForce RTX 3050 Laptop GPU 6 GB VRAM; 7.64 GiB OS-visible RAM (check free memory before model setup). **Do not plan on a ZBook or distributed GPUs.**
+**Status:** Authoritative *design and execution plan*, not evidence of completed implementation. The precise product models, source licenses, tool versions, role-holder names, and results are not yet verified.
 
 > **How to use this plan:** All humans and coding agents read `AGENTS.md` first, then this document. Tasks have an **owner**, **dependencies**, **files**, **steps**, and **definition of done (DoD)**. Update the execution ledger in §19 whenever an actual milestone changes; never mark proposed work as tested. The challenge and official event rules outrank this plan.
 
@@ -64,7 +64,7 @@
 4. Every tool call logged; insufficient evidence produces explicit uncertainty / **“I don't know”**. Safety answers preserve relevant manual warnings and include exactly **“check the manual and follow local regulations”**, evidence-quality confidence and human hand-off.
 5. The model is **decision support**, not a manufacturer manual, certified engineer or regulatory authority. State in UI and README.
 6. Work within the two-day event, comply with organizer freeze; don't assert that any unverified existing code is event-compliant. No extra stretch goals until core evidence is reproducible.
-7. All 3 teammates must be able to explain the full pipeline. One is the designated lead, one is the eligible Alumni/Finalist Collaborator, and their actual work must be documented. Names are assigned by the team, not invented here.
+7. All four teammates must be able to explain the full pipeline. One is the designated lead, one is the eligible Alumni/Finalist Collaborator, and their actual work must be documented. Names are assigned by the team, not invented here.
 
 **What is deliberately out of scope for the initial deliverable:** payments, live inventory synchronization, actual warranty/receipt verification, production identity-proofing, real customer data, geospatial depot routing, full offline inference, multilingual model serving, field device synchronization, microservices/Kubernetes and high-cost hosted AI services.
 
@@ -117,7 +117,23 @@ Two simple demo accounts can demonstrate distinct roles. A customer login may be
 | FR-14 | Rebuild/eval | Single command reconstructs index and outputs reports |
 | FR-15 | Latency/weak-connection evaluation | p50, p95 and local/small-model comparison included |
 
-### 1.4 Non-functional requirements (initial measurable targets)
+### 1.4 System-aware equipment knowledge
+
+KPP represents equipment as systems and components, so customers can describe a need in everyday language and engineers can follow a component to its documented behavior. A human-facing name such as “battery management system (BMS)” sits alongside exact manufacturer/model identity, a hierarchy, and carefully typed relationships. Human-facing names, aliases and functions help resolve requests such as “something that manages a solar battery”; they do not establish product identity or compatibility by themselves.
+
+A product record should preserve its exact identity, human-readable category path, common name, aliases, function, and source links. A small SQLite relationship table is sufficient initially:
+
+| Relationship | Meaning | Evidence rule |
+|---|---|---|
+| `part_of` | A component belongs to an assembly or system | Record the source and locator supporting the relationship |
+| `connects_to` | Equipment has an electrical or mechanical connection | Record the source and locator; connection does not imply compatibility |
+| `compatible_with` | Two specific models are documented to interoperate | Require explicit source evidence and human verification before use |
+| `documented_by` | A product or relationship is described by a source | Link source ID, revision, and exact page or line range |
+
+Relationships may form a hierarchy or a more complex network. Do not force every product into one parent-child chain. When a user describes a symptom or desired function, match common names and aliases to candidate systems/components, ask clarifying questions if identity is ambiguous, then retrieve evidence for the relevant product and relationship. Image classification can suggest a component type; model-specific guidance waits until the product identity is confirmed.
+
+The Libre Solar BMS C1 taxonomy proposal is a small example, not an approved catalogue item: the board can be named as a battery management board, categorized under battery management systems and battery energy storage, and linked to relevant source passages. Do not label it a solar battery or infer compatibility with an inverter or battery pack from a `connects_to` relationship.
+### 1.5 Non-functional requirements (initial measurable targets)
 
 These are **engineering targets, not measured claims**: backend health response p50 < 250 ms on Athena; text-only agent p50 target < 12 s on local inference; upload cap initially 8 MiB/image and 60 s/audio; idempotent upload retry; app remains responsive with loading/progress/cancel; no unauthorized evidence leaked; no secrets in logs; repeatable build on Windows 11 + compatible tooling; evaluation with fixed seeds, model hashes and stable benchmark IDs. Record actual results even if targets are missed. Images must keep sufficient resolution for tiny nameplate print. Text answer streaming is recommended; never stream unvalidated unsafe technical procedures without policy gates.
 
@@ -125,43 +141,51 @@ These are **engineering targets, not measured claims**: backend health response 
 
 ## 2. System boundaries and request flow
 
+The diagram shows the intended complete Product Copilot flow and labels each component by its current status: **implemented**, **partial**, or **pending**.
+
 ```mermaid
 flowchart TD
-  UI[React app: customer/engineer] -->|login + query| API[FastAPI: session, RBAC, rate-limit]
-  API --> PROC[Input validation & modality router]
-  PROC --> TXT[Text normalization]
-  PROC --> OCR[Photo OCR + model matching]
-  PROC --> STT[Audio ASR + transcript]
-  TXT --> ORCH[Single agent orchestrator]
-  OCR --> ORCH
-  STT --> ORCH
-  ORCH --> AUTHZ[Server authorization context]
-  AUTHZ --> CAT[SQL catalogue/spec/price tools]
-  AUTHZ --> RET[Authorized hybrid RAG: FTS + embeddings]
-  AUTHZ --> SAFE[Safety notice + human review tools]
-  CAT --> EVID[Evidence objects]
-  RET --> EVID
-  SAFE --> EVID
-  EVID --> VALID[Grounding + numeric + safety validator]
-  VALID --> RESP[Answer / sources / warnings / tool trace]
-  RESP --> UI
-  ORCH --> LOG[(Tool audit)]
-  API --> LOG
+  UI[Customer or engineer — React UI; implemented] -->|login| AUTH[Login and session handling; partial]
+  AUTH --> DB[(Application database; implemented)]
+  UI -->|text, photo or audio query| API[Authenticated FastAPI request; implemented]
+  API --> CTX[Resolve user and role; partial]
+  API --> MOD{Input type}
+  MOD -->|text| TEXT[Text chat and local model request; implemented]
+  MOD -->|photo| OCR[OCR and image identification; pending]
+  MOD -->|audio| ASR[Speech transcription; pending]
+  TEXT --> ROUTE[Chat routing; partial]
+  OCR --> ROUTE
+  ASR --> ROUTE
+  ROUTE --> MATCH[Match common names, aliases and functions; pending]
+  MATCH -->|ambiguous identity| CLARIFY[Ask user to identify equipment; pending]
+  MATCH --> AUTHZ[Enforce role permissions before data access; partial]
+  AUTHZ -->|authorized| CATALOG[Catalogue lookup; implemented]
+  AUTHZ -->|authorized| CALC[Price calculation and comparison APIs; implemented]
+  AUTHZ -->|authorized| RELS[Follow verified equipment relationships; pending]
+  RELS --> RETRIEVE[Retrieve licensed source passages and locators; pending]
+  AUTHZ -->|safety or insufficient evidence| HANDOFF[Warnings and refusals; partial]
+  HANDOFF --> HUMAN[Human-review workflow; pending]
+  CATALOG --> EVIDENCE[Synthetic catalogue facts]
+  CALC --> EVIDENCE
+  RETRIEVE --> EVIDENCE[Source-backed facts with page or line provenance]
+  EVIDENCE --> ANSWER[Grounded answer and validated citations; pending]
+  ANSWER --> RESPONSE[Answer, sources, warnings and tool trace; partial]
+  CLARIFY --> RESPONSE
+  HUMAN --> RESPONSE
+  RESPONSE --> UI
+  AUTHZ --> AUDIT[Authorization and tool-call audit; pending]
+  CATALOG --> AUDIT
+  CALC --> AUDIT
+  RETRIEVE --> AUDIT
+  HUMAN --> AUDIT
 ```
 
-**Data lifecycle:** licensed sources → source manifest → page extraction/OCR → human QA → normalized product/spec rows + classified chunks → embedding index → role-filtered retrieval → agent answer. Synthetics: canonical schema → seeded generation / optional watsonx adapter → FK/price/role validation → database → independent evaluation references. **Never generate technical values to fill unknown manufacturer fields.**
-
-**No microservices at this stage.** One FastAPI process can host HTTP tools and the agent module; local model inference is a separate localhost process (LM Studio or llama.cpp server). This reduces setup overhead and avoids remote GPU dependency. Other teammates use mock APIs locally, then integrate on Athena via Git; they do not need local NVIDIA hardware.
-
-**Key trust boundaries:** browser is untrusted; AI prompt, audio transcript and OCR are untrusted; uploaded documents may include malicious instructions; SQL and vector search are protected server resources; local-model provider is not authorized to choose roles. All source citations are validated against records returned by the authorized retrieval layer.
-
----
-
+The completed product resolves everyday names and functions to candidate equipment, follows verified equipment relationships, and grounds answers in licensed technical sources with page-level provenance. Deterministic code performs calculations. The server enforces role permissions before retrieval and tool access, validates citations and safety responses, and provides a functioning human-review path. Compatibility is asserted only when a reviewed source explicitly supports the specific models.
 ## 3. Athena-only environment and AI model choices
 
 ### 3.1 Hardware reality
 
-ATHENA: HP Victus 15 / i5-13420H / NVIDIA GeForce RTX 3050 Laptop GPU **6 GB VRAM** (diagnostically verified; corrects earlier RTX 4050 planning assumption). Previous RAM: **8 GB**; actual RAM must be checked with Task Manager/PowerShell before selecting simultaneous processes. Do **not** assume 16–32 GB installed. Only one GPU compute host; models should be loaded sequentially or with strict memory limits. Teammates can run frontend, backend, data processing or tests on any basic CPU computer using mocks, but their devices are not part of the inference plan.
+ATHENA: HP Victus 15 / i5-13420H / NVIDIA GeForce RTX 3050 Laptop GPU **6 GB VRAM**. OS-visible RAM: **7.64 GiB**; check available memory before selecting simultaneous processes. Do **not** assume 16–32 GB installed. Only one GPU compute host; models should be loaded sequentially or with strict memory limits. Teammates can run frontend, backend, data processing or tests on any basic CPU computer using mocks, but their devices are not part of the inference plan.
 
 **Start of hardware validation:** `nvidia-smi`; PowerShell `Get-CimInstance Win32_ComputerSystem | Select TotalPhysicalMemory`; `python --version`; `node --version`; verify disk free space, CUDA driver compatibility, GPU power mode and whether LM Studio already serves localhost. Save timings, peak RAM and VRAM in `reports/hardware_baseline.md` — not imagined benchmarks.
 
@@ -233,7 +257,7 @@ Numbers here are **proposed configurable defaults**, not manufacturer specs, tax
 ```text
 jenga-consultants/
 ├── AGENTS.md                         # autonomous agent coordination, read first
-├── JENGA_CONSULTANTS_MASTER_PLAN.md # this canonical design (copy into repo root)
+├── project-plan.md # this canonical design (copy into repo root)
 ├── README.md                         # public setup/demo, SDG and AI disclosure
 ├── DATA.md                           # mandatory sources/licenses/data dictionary
 ├── .env.example                      # no credentials
@@ -1020,6 +1044,22 @@ At minimum, run `pytest backend/tests ai/tests tests/integration -q` with dummy 
 
 ## 19. Execution ledger — live state, to update collaboratively
 
+The latest local working-tree checkpoint is the OCR boundary entry below and
+[its contract/evidence](docs/ocr_identification_contract.md). Earlier repository
+checkpoints and test results are dated history; they do not describe deployment.
+
+**A-05 OCR component (13 November 2026):** Added `ai/multimodal/nameplate_ocr.py`
+and `ai/tests/test_nameplate_ocr.py`. The component runs local Tesseract and
+matches exact model numbers only against candidates supplied by its caller;
+missing or multiple matches require confirmation. Test command:
+`C:\Users\wisdo\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe -B -m unittest ai.tests.test_nameplate_ocr -v`
+returned 3 passed. Tesseract was not found on PATH; the subprocess was mocked,
+so real OCR and accuracy remain untested. No app integration or shared contract
+changed. Backend must authenticate, safely decode images and filter candidate
+records before calling this component. Approved source ingestion and B/A schema
+and ACL contracts remain blocked; B and A should review the integration before
+connecting it to either role.
+
 **Current repository checkpoint (13 November 2026):** PR #1 merged into
 `main@1db776e` at 00:54 EAT. It contains AI ingestion and validation code,
 tests, candidate data and documentation. Frontend source is in root `src/`;
@@ -1049,10 +1089,10 @@ are pending. Next: B reviews schema and authorization; A verifies PDF provenance
 |---|---|---|---|---|
 | G0 Repo scaffold + contracts | Lead/all | IN PROGRESS | A = KWAIX; PR #1 merged into main at 1db776e; backend/frontend present; .env ignored; shared contracts pending | B/F review contracts; lead/team eligibility assignment outstanding |
 | G1 Licensed data + schema | A+B | IN PROGRESS | 43 AI tests passed; 15 candidate products across 3 categories; 13 verified official document URLs/hashes plus 6 pending BMS chapters; 2 document URLs pending; 0 approved products; commercial rights and B contracts block ingestion | complete rights and technical review; verify Kipor/Cummins documents; agree B schema & IDs |
-| G2 Text vertical slice | F+B+A | NOT STARTED | needs auth+retrieval+UI | wire one cited answer |
-| G3 Full catalogue | A+B | NOT STARTED | canonical specs and synthetic fixtures TBD | generate, normalize, validate |
-| G4 Multimodal | F+A | NOT STARTED | labeled media and model testing TBD | ASR+OCR held-outs |
-| G5 Evaluation/security | all | NOT STARTED | 60-case gold benchmark TBD | implement suite and oversight |
+| G2 Text vertical slice | F+B+A | IN PROGRESS | local chat, session enforcement and catalogue ACL tested; browser, frontend auth lifecycle and approved page grounding incomplete | verify UI auth flow and approved citations |
+| G3 Full catalogue | A+B | IN PROGRESS | tools and explicit grants tested on three synthetic rows; 15 real candidates remain unapproved | approved specifications, ID mapping and full catalogue |
+| G4 Multimodal | F+A | IN PROGRESS | native OCR route smoke passes; image validation/ownership and typed outcomes tested; UI/audio/fusion/held-outs incomplete | F/A contract review, image UI, labeled evaluation |
+| G5 Evaluation/security | all | IN PROGRESS | session/catalogue/image security regressions pass; no 60-case gold benchmark or adversarial before/after report | complete resource policy, benchmark and oversight |
 | G6 Rebuild & submission | lead/all | NOT STARTED | event freeze and evidence pending | run command, docs, demo/video |
 
 **Proposed task assignment template (fill in actual people):** `F = [team member]`, `B = [team member]`, `A = [team member]`, `LEAD = [F/B/A]`, `ALUMNI_FINALIST = [F/B/A]`. Record full names in a private team workspace if appropriate; public submission includes organizer-required details only.
@@ -1074,7 +1114,7 @@ are pending. Next: B reviews schema and authorization; A verifies PDF provenance
   source_validation.json,source_manifest_validation.md}`; this ledger.
 - Test: Python 3.14.7 `-m unittest discover -s ai/tests -v`: **14 passed**, 0.838 s,
   including CLI integration. Interpreter:
-  `C:\Users\wisdo\AppData\Local\Python\pythoncore-3.14-64\python.exe`.
+  `%LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe`.
 - Coverage check: same interpreter `-m ai.ingestion.manifest --require-coverage
   --report reports/source_validation.json`: **exit 1 expected**; manifest structure
   valid, coverage not ready, **0 products / 0 categories**. Source and license
@@ -1246,6 +1286,465 @@ are pending. Next: B reviews schema and authorization; A verifies PDF provenance
 - Next: B/A agree ID, specification and authorization contracts; F reviews UI
   claims and data wiring. Rights and technical reviews remain pending.
 
+### Paused local development experiment - 13 November 2026
+
+- Owner: AGENT-A. A separate OpenCode/local-Qwen development experiment was
+  stopped and documented in `docs/misc/local_model_development_experiment.md`.
+  It does not establish product inference performance or completion. Existing
+  uncommitted changes have not been attributed to the experiment or reviewed.
+- Documentation-only change; no product contract changed. Verification:
+  `git diff --check` (run after the documentation update; see handoff).
+  Next: AGENT-A and the relevant owner review existing changes before use.
+
+### Local chat patch integration - 13 November 2026
+
+- Scope: B-08 (§7.4; B-07 in §14) local chat adapter and partial B-05
+  catalogue authentication. Applied the previously prepared
+  `kpp-local-chat.patch` cleanly on `feature/local-e2e-contracts`, base
+  `c1804e9`. Changes are uncommitted; no push, merge or deployment.
+- Paths: `backend/app/services/{ai,chat}.py`,
+  `backend/app/api/{catalog,chat}.py`, `backend/tests/{test_api,test_local_chat}.py`,
+  `docker-compose.yml`, `DEPLOYMENT.md`, `docs/LOCAL_CHAT_HANDOFF.md` and this
+  ledger. Pre-existing edits, including the plan rename and schema work, remain.
+- Behavior: explicit local provider selection without hosted fallback; separate
+  local credentials; completed-answer checks; catalogue authentication and
+  comparison field allowlist; product-row context references and excerpts.
+  Existing JSON fields and DB schema are unchanged.
+- Verification: backend pytest **41 passed in 6.75 s**, isolated temporary SQLite;
+  AI unittest **43 passed in 2.024 s**; `git diff --check` passed. Backend tests
+  exited 0, followed by a Windows temporary-DB cleanup warning; cleanup completed
+  after process exit. `npm run build` failed with TS2307: installed
+  `lucide-react` module/types missing at `src/App.tsx:23`.
+  Exact commands and earlier temporary-copy smoke evidence are recorded once in
+  [the local chat handoff](docs/LOCAL_CHAT_HANDOFF.md).
+- B/A review requested for provider/authentication changes; F review requested
+  for citation display and trace label. No review approval is recorded. No
+  benchmark data, model assets or licenses changed. Live inference and browser/
+  deployment behavior were not reverified here. G2, per-resource ACLs, approved
+  manufacturer-page grounding and model approval remain incomplete.
+- Next: restore frontend dependencies, verify browser text flow and complete
+  cross-role review before merge; then agreed ACL and approved source grounding.
+
+### Local chat frontend and HTTP verification - 13 November 2026
+
+- Scope: F-07/F-09/F-10, B-08 follow-up. Restored 171 locked npm packages with
+  `npm ci`; dependency manifests unchanged. Updated `src/App.tsx` and
+  `src/App.css` so both chat views render messages, backend warnings/confidence,
+  source excerpts and tool label; dedicated chat also shows pending/errors and
+  disables duplicate/empty sends. No backend/API/DB change in this follow-up.
+- `npm run lint` passed. An initial build ran out of memory (221 MiB RAM free);
+  a serial build with scoped Node heap/worker and Rayon limits passed TypeScript
+  and Vite (2,085 modules, 5.06 s). Exact commands and evidence are in
+  [the local chat handoff](docs/LOCAL_CHAT_HANDOFF.md#frontend-and-live-http-follow-up).
+- Current-checkout HTTP smoke used a temporary SQLite DB and the already loaded
+  local Qwen. Health, anonymous catalogue denial, both-role login/catalogue/chat
+  and customer restricted-query refusal passed. Customer/engineer chat returned
+  200 in 22.88/22.96 s with three synthetic product references/excerpts. Two
+  requests are smoke evidence only. Temporary server/DB removed; .env unchanged.
+- Browser host and native pipe unavailable on two discovery attempts; no browser
+  rendering, keyboard/mobile or screenshot evidence claimed. G2 stays in
+  progress. F/B/A review requested for displayed evidence and integration;
+  approved sources, per-resource authorization and model approval remain open.
+- These code changes remain uncommitted. Preserved the independently added
+  README acknowledgements commit `a0fe9ab`. Next: restore browser access and run
+  both-role UI verification, then agreed ACL and approved document grounding.
+
+### Backend session and conversation enforcement - 13 November 2026
+
+- Owner: AGENT-B scope, B-03/B-04/B-08/B-10 (§7.4), with the chat-to-review
+  reference correction. Changed `backend/app/auth/security.py`,
+  `backend/app/core/sessions.py`, `backend/app/api/{auth,chat}.py`,
+  `backend/app/schemas/chat.py`, and added
+  `backend/tests/test_session_conversation_security.py`. Updated README,
+  `docs/LOCAL_CHAT_HANDOFF.md`, `docs/SECURITY.md` and this ledger.
+- JWTs now bind to stored sessions; expiry/revocation/active-account checks apply
+  to cookie and bearer access. `/auth/me` accepts both; logout revokes submitted
+  valid credentials. Chat checks owned/active conversations before inference,
+  creates an owned record for first messages, and returns usable review IDs.
+  Empty questions/conflicting references return 422. New-token login required;
+  no JSON fields, DB schema or migration changed.
+- Validation: **79 passed in 21.64 s** (38 new security cases + 41 pre-existing
+  backend tests), temporary SQLite and blocked provider calls. Initial test
+  setup hit a pytest temporary-directory permission error; the final run used
+  an explicit isolated base directory. Exact command, coverage and limitations
+  are recorded once in [the security note](docs/SECURITY.md).
+- F/A cross-review requested for token/session behavior, trusted identity and
+  401/404/409/422 handling. No approval, complete RBAC, human-review resolution,
+  model evaluation, browser or deployment pass is claimed. Code is uncommitted.
+- Parallel tasks assigned by user: Agent 1 owns UI truthfulness in
+  `src/App.tsx`/`src/App.css`; Agent 2 owns only
+  `backend/tests/test_catalogue_tools.py`. Their work is excluded from this
+  verification and will be reviewed only after the user's go-ahead. Next:
+  review those reports when authorized, then wire frontend auth lifecycle and
+  complete resource ACL and approved-source grounding. G2/G5 remain incomplete.
+
+### OCR boundary and delegated-task review - 13 November 2026
+
+- Scope: B-05/B-07 + A-05 (§7.4/§9.7), using the authenticated user from the
+  preceding session work. Branch `feature/local-e2e-contracts`, HEAD `a0fe9ab`;
+  all implementation changes remain uncommitted; no push, merge or deployment.
+- Added explicit `product_access` grants and SQL predicates before catalogue
+  materialization. Applied them to OCR candidates, catalogue/legacy routes,
+  pricing/comparison, chat context and citation excerpts. Unknown grants deny;
+  initial upgrade classifies only known synthetic demo rows. Restricted context
+  requires local inference; it cannot enter the optional hosted chat path.
+- Implemented bounded image bytes/decode, orientation and metadata stripping,
+  private sanitized storage, owner-bound GET/DELETE/identify, access expiry,
+  transport caps and a per-process processing slot. Typed response distinguishes
+  identified/ambiguous/unidentified without invented confidence scores. Chat
+  rejects media IDs while fusion is absent. API/DB additions require F/A/B
+  cross-review; no contract approval or full multimodal completion is claimed.
+- Preserved and extended the existing `ai/multimodal/nameplate_ocr.py` entry
+  points; removed the duplicate helper created during initial implementation.
+  Tesseract 5.4.0.20240606 plus English data installed through approved winget
+  invocation; actual system-default path, hashes and license are recorded in
+  [the contract](docs/ocr_identification_contract.md). No LLM or GPU model loaded.
+- Agent 1 review: unsupported stats, verified-document placeholders and fake
+  comparisons removed; chat evidence preserved. Independently passed lint/build.
+  Agent 2 review: aligned isolated fixtures with explicit grants/active users,
+  added comparison regressions, and ran the previously unexecuted test file as
+  part of the full backend suite. Mock tool authentication is not a substitute
+  for the separate session tests.
+- Final validation: **120 backend tests passed in 31.24 s; 55 AI tests passed in
+  2.615 s**; lint/build and diff checks passed. Six native OCR route smokes cover
+  both roles and all three outcomes on three synthetic images. Detailed results,
+  exact commands and limitations are recorded once in the contract and
+  `reports/ocr_boundary_smoke.json`; no held-out accuracy is claimed.
+- Changed paths: `backend/app/db/database.py`, `services/{authorization,images,
+  identification,chat}.py`, `tools/catalog.py`, `api/{catalog,chat,media}.py`,
+  `core/{config,media_limits}.py`, `schemas/identification.py`, `main.py`,
+  `backend/requirements.txt`, `backend/tests/{test_image_identification,
+  test_catalogue_tools}.py`, `ai/multimodal/`, `ai/tests/test_ocr.py`, deployment/
+  ignore files, README/DATA/security/handoff notes, the OCR contract/report and
+  this ledger. Other worktree files, experiments, PDFs and prior edits preserved.
+- Next: F/A review the response and candidate contract; second B review for the
+  additive table/bootstrap. Then frontend upload/identify/confirmation wiring
+  and labeled held-out images. Approved source ingestion, document/vector ACLs,
+  audio/fusion, automatic retention cleanup/quotas, benchmark, browser and Docker/
+  deployment verification remain open. G2/G4/G5 are not complete.
+
+### OCR transparency correction and data-readiness check - 13 November 2026
+
+- Scope: B-07/A-05 and F-10. Image sanitization now composites transparency on
+  white before RGB encoding. Native synthetic probes confirmed that the former
+  conversion exposed an invisible model label; the corrected input produces no
+  OCR text while the opaque control still matches. No field-accuracy claim.
+- Changed `backend/app/services/images.py`,
+  `backend/tests/test_image_identification.py`, `src/App.tsx`, `src/App.css`,
+  `docs/ocr_identification_contract.md` and this ledger. Replaced the static
+  Online/Secure Session badge with a neutral unknown state. No live connectivity
+  monitor, API/DB field change or deployment is claimed.
+- Focused image checks: **34 passed in 23.78 s**; native alpha/control probes,
+  frontend lint, low-memory build (5.16 s) and diff checks passed. Details are in
+  the OCR contract's transparency/data-readiness follow-up. Prior full-suite
+  results were not represented as a fresh complete run.
+- User confirmed images/KB are not ready and data-definition answers are being
+  prepared. PDF reviewed without editing. ID/model-field mapping and finer
+  supplier/assignment permissions need agreement before ingest. No generator or
+  data schema changed. Next: approved data slice/mapping, image UI and real
+  labeled development/held-out evaluation. Cross-review remains pending.
+
+### Speech adapter and WER checkpoint - 13 November 2026
+
+- Scope: §9 A-06 / FR-04, AI-owned internal module only; **IN PROGRESS**.
+  §14 task numbering differs, so this entry explicitly uses §9. No API/DB or
+  frontend contract change. Backend audio ownership/conversion handoff and
+  metric-policy review requested in [ASR handoff](docs/asr_handoff.md).
+- Added `ai/multimodal/asr.py`, `ai/multimodal/wer.py`,
+  `ai/tests/test_asr.py`, `ai/tests/test_wer.py` and `docs/asr_handoff.md`.
+  WAV validation/re-encoding, CPU-only whisper.cpp invocation, one process-wide
+  slot, time/output limits, cleanup and explicit failures are implemented.
+  WER has deterministic normalization, S/D/I counts, corpus weighting and
+  undefined zero-reference handling. No benchmark/gold data was created.
+- Actual final command: PowerShell here-string piped to bundled
+  `C:\Users\wisdo\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe -`,
+  executing `sys.path.append(r'Q:\kpp\.venv\Lib\site-packages')`,
+  `suite = unittest.defaultTestLoader.discover('ai/tests')`, then
+  `unittest.TextTestRunner(verbosity=1).run(suite)` with nonzero exit on failure:
+  **75 passed in 3.094 s**, including 20 new speech/metric tests.
+  `git diff --check` passed. Initial inline Python commands failed due to Windows
+  argument quoting; corrected stdin commands ran successfully.
+- Engine calls are mocked; generated WAV containers are test fixtures, not
+  labeled speech. No native transcription, WER score, modality improvement,
+  browser workflow or integration completion is claimed. Existing audio upload
+  currently stores metadata without retaining audio for transcription.
+- No whisper-cli/FFmpeg/CMake on PATH; no Whisper model found in repository
+  inventory. Native setup remains unverified. Available RAM snapshot 206 MiB
+  of 7821 MiB, available commit 4323 MiB; no model loaded/downloaded.
+- Next: verified engine/model/hashes/license and memory headroom, native smoke,
+  B/F-reviewed protected audio/codec contract, 15 labeled recordings and measured
+  WER; then §9 A-07 fusion. Cross-role review and native integration pending.
+
+### Protected audio and voice/photo input integration - 13 November 2026
+
+- Scope: FR-04/FR-05, §9 A-06/A-07 and B-07/F media integration. **IN PROGRESS**;
+  input preparation is tested, full grounded answer and native ASR are not.
+- Added `backend/app/services/audio.py`, `backend/app/services/multimodal.py`,
+  `backend/app/schemas/transcription.py`, `backend/tests/test_audio_multimodal.py`,
+  `ai/multimodal/media_fusion.py`, `ai/tests/test_media_fusion.py`, `src/media.ts`.
+  Updated `backend/app/api/media.py`, `backend/app/api/chat.py`,
+  `backend/app/schemas/chat.py`, `backend/app/core/config.py`,
+  `backend/tests/test_image_identification.py`, `src/App.tsx`, `README.md`,
+  `docs/asr_handoff.md`, `docs/ocr_identification_contract.md` and this ledger.
+- API changes for B/F/A review: canonical audio persistence/read/delete;
+  `POST /api/v1/media/{id}/transcribe`; media-only chat accepted through existing
+  `media_ids`; existing `structured_results` carries transcription/identification
+  and clarification/evidence-unavailable state. Raw WebM/MP3 uploads now rejected
+  rather than metadata-only success; browser converts supported audio to WAV.
+  No DB migration. Exact fields/errors and operator config in the ASR handoff.
+- All media and conversation ownership/expiry checks run before either native
+  engine. Matching uses authorized catalogue candidates. Engines run sequentially;
+  per-process ASR slot/timeout retained. Missing/ambiguous/conflicting model inputs
+  ask clarification. Technical media answers stop at missing approved evidence;
+  no fabricated manual steps/citations or measured confidence. Approved retrieval,
+  follow-up confirmation state and full engineer/customer scenarios remain pending.
+- Actual backend command: bundled Python stdin runner (same environment setup as
+  preceding entry), `pytest.main(['backend/tests', '-q', '--basetemp=' +
+  str(Path(work) / 'pytest')])`, isolated temporary `DATABASE_URL` and explicit
+  engine disposal: **139 passed in 39.24 s**. Initial focused run had an obsolete
+  image-chat 422 test fail; replaced it with processed-identification assertions.
+- Actual AI command: bundled Python stdin runner appending project site-packages,
+  `unittest.defaultTestLoader.discover('ai/tests')` and TextTestRunner:
+  **79 passed in 3.471 s**. Native engines mocked; these are regression results,
+  not WER, held-out image accuracy or answer-quality evaluation.
+- `npm run lint` passed. `npm run build` with scoped
+  `NODE_OPTIONS=--max-old-space-size=384 --v8-pool-size=1` and
+  `RAYON_NUM_THREADS=1` passed (Vite 6.28 s). Node stdin assertions imported
+  `src/media.ts` and checked WAV header, PCM sample encoding, stereo downmix,
+  duration/size rejection and cleanup using a mocked AudioContext; passed.
+  `git diff --check` passed. No browser/device/native ASR verification claimed.
+- Review requested from B/F owners for route/upload behaviour and response shape,
+  A for ambiguity policy; pending. Preserve mixed worktree; no commit, deployment,
+  model download or runtime switch. Next: verified speech runtime/model plus one
+  real recording; browser voice/photo check; labeled WER/image tests; approved
+  source retrieval. No navigation/nearby-place feature added in this checkpoint.
+
+### Frontend recovery pages and media collection guidance - 13 November 2026
+
+- Scope: F-06/F-09/F-10; frontend recovery states, no backend/DB/API-shape
+  changes. Existing mixed working tree, media integration and branch preserved.
+- Added `src/components/ErrorPage.{tsx,css}`, `src/errorStates.ts` and
+  `src/WorkspaceRouter.tsx`; updated `src/main.tsx` and bounded portions of
+  `src/App.tsx`. Unknown paths render not-found; permission, missing-role,
+  expired-session and identity-check failure states share a blue terminal/status
+  composition adapted from the local KWAIX portfolio not-found source. Live
+  kwaix.dev retrieval was unavailable; no deployed-reference match is claimed.
+- Saved sessions now resolve role through existing `/auth/me` before workspace,
+  catalogue or history rendering. Missing roles no longer expose a chooser.
+  Authenticated 401/403 enter recovery; login failures remain inline; resource
+  404/media-validation errors remain contextual. Recovery attempts logout and
+  clears local state. Active chat/media fetches are aborted on local logout and
+  late aborted results ignored. Backend remains the permission authority.
+- Added `tests/frontend_error_states.test.mjs`, `docs/frontend_error_states.md`
+  (wireframe/component relationships, routes, limitations, review request), and
+  `docs/media_collection.md` (30-image collection proposal, provenance and split
+  rules). No dataset images collected/approved, benchmark labels altered,
+  shared data schema changed, model loaded or dependencies added.
+- Actual commands/results: `node --test tests/frontend_error_states.test.mjs`:
+  **8 passed**; `npm run lint`: **passed**; `npm run build` with scoped
+  `NODE_OPTIONS=--max-old-space-size=384 --v8-pool-size=1`,
+  `RAYON_NUM_THREADS=1`: **passed**, final Vite phase **5.79 s**. Tests use
+  actual React server rendering, including a tampered stored engineer role
+  remaining behind identity verification. They do not test browser effects.
+- Production preview on an owned temporary port served root/chat/unknown/403/
+  missing-role/expired-session URLs and the built JS. SPA entry responses are
+  HTTP 200; this is not server-rendered HTTP 404 or executed-browser evidence.
+  Browser host/native pipe unavailable, so visual, keyboard/mobile, recovery
+  clicks and live auth transitions remain unverified. Server stopped after checks.
+- Handoff: F review composition/navigation; B review identity/status/recovery;
+  A review contextual source/media errors. Review is requested in the handoff,
+  not approved. Existing customer comparison/media navigation restrictions still
+  need F/B alignment with both-role requirements. No commit, push or deployment.
+  Exact component map and remaining checks: `docs/frontend_error_states.md`.
+
+### Deterministic comparison chat checkpoint - 13 November 2026
+
+- User requested a few focused checks, then progress to the next requirement.
+  Deferred ASR runtime staging/loading after finding only 91 MiB free RAM;
+  no runtime/model download or process shutdown. Preserved other agents' new
+  frontend files and media-collection work.
+- Scope: FR-07 / §9 A-04 / B-06. Comparison chat now calls the shared authorized
+  catalogue comparison tool directly, returns row citations, Markdown fallback
+  table and `structured_results.comparison` (`products`, `fields`,
+  `different_fields`). No inference or invented task suitability. Current demo
+  text specs do not fulfil approved normalized manufacturer comparison.
+- Changed `backend/app/tools/comparison.py`, `backend/app/api/catalog.py`,
+  `backend/app/services/chat.py`, `backend/app/api/chat.py`,
+  `backend/tests/test_chat_comparison.py`, `docs/comparison_chat_handoff.md` and
+  this ledger. Existing comparison API fields and five-value chat service return
+  remain stable. Optional internal result dict added; shared contract review
+  requested in the handoff. No frontend edits in this checkpoint.
+- Focused test command: bundled Python stdin runner with project site-packages,
+  backend import path, temporary SQLite `DATABASE_URL`, explicit pytest basetemp
+  and engine disposal (same pattern as prior entries). Initial
+  `pytest.main(['backend/tests/test_chat_comparison.py',
+  'backend/tests/test_catalogue_tools.py', '-q', '--basetemp=' + ...])`:
+  13 passed, 1 failed in 9.77 s. It exposed the pre-existing singular-only
+  restricted-topic matcher for "internal margins"; plural handling corrected.
+  Final rerun of `backend/tests/test_chat_comparison.py` only: **3 passed in
+  4.58 s**. Existing 11 catalogue cases passed in the initial run.
+  `git diff --check` passed. No full-suite/frontend/runtime rerun claimed.
+- FR-07 remains **IN PROGRESS**: F table rendering/cross-review, approved
+  normalized spec data, source evidence, task-relevant trade-offs and media
+  comparison routing remain. No commit, deployment or source approval.
+
+### Comparison table display in chat - 13 November 2026
+
+- Scope: FR-07 frontend display follow-up. Updated `src/App.tsx`, `src/App.css`,
+  `docs/comparison_chat_handoff.md` and this ledger. Consume existing
+  `structured_results.comparison`; no API/schema/data/model change.
+- Both shared chat displays now show a semantic comparison table with model
+  column headings, stored field values, KES price formatting, missing-value
+  labels and highlighted differing rows (text marker plus background).
+  Synthetic catalogue caption, source citations, warnings and tool trace retained.
+  Raw fallback Markdown table hidden when structured comparison is present.
+  Horizontal scrolling and keyboard focus styling added; no new dependencies.
+- Preserved other agents' frontend routing/auth/error-state changes. The separate
+  Compare Solutions page is still unconnected; this checkpoint covers chat.
+- Focused validation only: `npm run lint` passed; `npm run build` with scoped
+  `NODE_OPTIONS=--max-old-space-size=384 --v8-pool-size=1` and
+  `RAYON_NUM_THREADS=1` passed (Vite 3.98 s); `git diff --check` passed.
+  No backend/model test rerun. Browser/phone visual verification remains pending.
+- FR-07 remains **IN PROGRESS** for approved normalized specs, task-specific
+  differences, media-comparison routing and cross-role review. No commit or deploy.
+
+### Backend regression and frontend checks - 13 November 2026
+
+- Scope: B-10 and F-10 verification. Preserved the existing mixed working tree
+  on `feature/local-e2e-contracts` at `a0fe9ab`; no commit or deployment.
+- Changed `backend/tests/test_image_identification.py`: the restricted-citation
+  test mock now accepts the existing keyword-only `structured_results` argument.
+  The customer request and empty-citation assertion are unchanged. The earlier
+  141-pass/1-failure run stopped inside the mock before testing that assertion;
+  this correction exercises the existing response authorization filter.
+- Changed `eslint.config.js`: exclude the local Python `.venv` directory from
+  ESLint's repository scan. Application source remains covered. The preceding
+  review's lint command was interrupted before reaching the build.
+- Backend command from the repository root, with the existing installed
+  dependencies, an isolated temporary SQLite database and mocked native/model
+  boundaries:
+
+  ```powershell
+  & 'C:\Users\wisdo\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -B -u -c "import os,sys,tempfile;sys.path.append(r'Q:\kpp\.venv\Lib\site-packages');sys.path.insert(0,r'Q:\kpp\backend');work=tempfile.TemporaryDirectory(prefix='kpp-contract-fix-');os.environ['DATABASE_URL']='sqlite:///'+work.name.replace(chr(92),'/')+'/suite.db';os.environ.pop('LLM_BASE_URL',None);os.environ.pop('OPENAI_API_KEY',None);import pytest;result=pytest.main(['backend/tests','-q','-p','no:cacheprovider','--tb=short','--basetemp',work.name+'/pytest']);from app.db.database import engine;engine.dispose();raise SystemExit(result)"
+  ```
+
+  Actual result: **142 passed in 87.88 s**.
+- Frontend commands: `npm run lint` passed; `npm run build` passed, Vite phase
+  **15.55 s**, with scoped `NODE_OPTIONS=--max-old-space-size=384 --v8-pool-size=1`
+  and `RAYON_NUM_THREADS=1`. These establish static/build checks, not browser
+  journeys, native ASR/OCR quality or deployed behavior.
+- Changed paths in this checkpoint: the test file, ESLint config and this ledger.
+  No API, DB, authorization behavior, source approval or benchmark change.
+  G1/G2/G4/G5/G6 acceptance states remain unchanged.
+- Next handoff: F review the tooling exclusion; B retain the citation regression
+  when changing chat orchestration. Approved catalogue ingestion remains blocked
+  by source rights/technical reviews and the B/A ID/specification mapping
+  agreement recorded in `docs/AI_HANDOFF.md`. No pending record was approved.
+
+### Local and upstream reconciliation - 13 November 2026
+
+- User authorized safe commits and reconciliation while preserving newer
+  development. Scope: integration of B-03/B-04/B-05/B-07/B-08/B-10,
+  F-06/F-09/F-10 and existing A-05/A-06/A-07 adapters; no source approval,
+  model loading, benchmark changes, deployment or push.
+- Original checkout remains on `feature/local-e2e-contracts` at `a0fe9ab`.
+  Reconciliation checkout: `Q:\kpp\tmp\reconcile-worktree`, branch
+  `feature/backend-local-reconciliation`. SHA-256 checks confirmed all 74
+  selected original source/test/document files were unchanged during integration.
+- Local snapshot commits: `0b277f2` backend/AI, `d7b3f77` frontend,
+  `bafea83` documentation/plan rename. Incoming main: `0d8cb73`.
+  Fetched again after the user flagged new development; main remained unchanged.
+  The separate API proxy fix and workflow-visual branches were inspected.
+- Preserved upstream split Vercel/Python hosting, env templates, health probes,
+  product illustrations and owner-bound account history. Retained removal of
+  obsolete Docker/Nginx configuration; earlier versions remain in Git history.
+  Preserved local trusted sessions, pre-retrieval catalogue grants, deterministic
+  comparison payloads/tables, recovery views, OCR and local WAV/ASR adapters.
+- Resolved media-policy conflict explicitly: local photo/voice is the default.
+  Hosted processing requires `ENABLE_HOSTED_MEDIA=true`, no `LLM_BASE_URL`,
+  an approved provider/data configuration and request consent. Restricted
+  catalogue context is rejected before hosted loading/transcription. Missing
+  local engines never trigger a hosted fallback. Upstream tests now explicitly
+  opt into their mocked hosted profile and use a decodable image fixture.
+- Reconciled history stores only response-filtered citations plus comparison
+  metadata. Customer history checks server-written audit roles before selecting
+  messages; a demoted engineer account cannot recover its engineer history.
+  Sign Out now attempts server revocation and clears/aborts local state first.
+  Missing document/comparison screens and unmeasured metrics retain honest states.
+- Actual backend command: bundled Python `-B -X utf8 -u -c` runner adding the
+  original `.venv/Lib/site-packages` and isolated checkout's `backend` to imports;
+  temporary SQLite `DATABASE_URL`; removed `LLM_BASE_URL`, `OPENAI_API_KEY` and
+  `ENABLE_HOSTED_MEDIA`; `pytest.main(['backend/tests', '-q', '-p',
+  'no:cacheprovider', '--tb=short', '--basetemp', work.name+'/pytest'])`, engine
+  disposal after the suite: **162 passed in 91.44 s**. Includes seven new
+  integration cases in `backend/tests/test_reconciliation.py`.
+- AI unittest discovery in the isolated checkout with the same existing
+  site-packages: **79 passed in 5.568 s**. Frontend: `npm run lint` passed;
+  `npm run build` passed (Vite **11.35 s**) with scoped
+  `NODE_OPTIONS=--max-old-space-size=384 --v8-pool-size=1` and
+  `RAYON_NUM_THREADS=1`; `node --test tests/frontend_error_states.test.mjs`:
+  **8 passed**. `git diff --check` passed. No live provider/native engine,
+  executed browser, deployed endpoint, WER or held-out accuracy claim.
+- Excluded and preserved in the original checkout: experimental
+  `backend/app/schemas/contracts.py` (unreviewed agreement claims), generation
+  drafts under `jddanswer`, input PDF, standalone Token Lab smoke scripts,
+  temporary runners/logs/DBs, real env files and large model artifacts.
+  Tracked-file checks found no credential-pattern matches or prohibited artifacts.
+- Cross-role review requested: B review history/ACL/hosted gates and table startup;
+  F review combined account-chat/auth/media states and both-role navigation;
+  A review local/hosted boundaries and citation provenance. Reviews remain pending.
+  Approved sources, canonical ID/specification mapping, complete safety/reviewer
+  flow, browser journeys, model provenance and measured evaluation remain open.
+
+### API proxy follow-up and reconciliation handoff - 13 November 2026
+
+- Reconciliation committed locally as `8657a40`. After inspecting the new remote
+  development, included only `origin/fix/vercel-api-proxy@602479e` as cherry-pick
+  `253d8ce`; two files, API rewrite plus its expected configuration test.
+  The rewrite precedes the SPA fallback. Workflow visuals `c46c484` stay separate.
+- Actual focused command after the cherry-pick: same isolated bundled-Python
+  runner as above, `pytest.main(['backend/tests/test_deployment_config.py', '-q',
+  '-p', 'no:cacheprovider', '--tb=short', '--basetemp', work.name+'/pytest'])`:
+  **8 passed in 9.29 s**. No application-source changes after the 162-test suite.
+  No additional full-suite/build rerun was needed for this configuration-only fix.
+- Handoff, conflict decisions, excluded files, review requests, actual results
+  and remaining runtime limits: `docs/reconciliation_handoff.md`.
+  Original snapshot hashes still match. Branch is local; no push, PR,
+  `main`/`dev` merge or deployment is claimed.
+- Final remote refresh retained `main@0d8cb73` and found proxy-branch follow-ups
+  `eba9b5b` and `0ea6ebd`. Included only the production same-origin source fix
+  `0ea6ebd` as `d24a802`; kept the mixed retry/imagery commit separate because its
+  generic error handling needs review against typed auth recovery. Updated
+  README/deployment guidance to match production routing. No remote write.
+- Final frontend check after `d24a802`: `npm run lint` passed; `npm run build`
+  passed, Vite **8.80 s**, with the same scoped low-memory settings plus
+  `VITE_API_BASE_URL=https://routing-check.example.invalid/api/v1`. A search of
+  all emitted JS found no test override hostname, confirming production ignores
+  the development API URL. This is a build/configuration check, not browser or
+  deployed proxy verification. Final whitespace and original-file hash checks
+  passed.
+
+### PR #4 conflict follow-up - 13 November 2026
+
+- User showed the two GitHub conflicts after `main` advanced to `0ea6ebd`.
+  Integrated that main into the isolated feature checkout; original dirty
+  checkout and `main`/`dev` remain unchanged. No force push or PR merge.
+- `DEPLOYMENT.md`: retained precise production/development routing guidance and
+  main's new 502 troubleshooting. `src/App.tsx`: combined main's GET-only retry
+  loop and friendly gateway errors with `ApiError` status preservation; check
+  cancellation before each attempt. Kept main's imagery JSX and auto-merged CSS.
+  Updated `docs/reconciliation_handoff.md` to distinguish the initial snapshot
+  from this follow-up. Workflow visuals `c46c484` remain separate.
+- Focused command: `node Q:\kpp\tmp\check_api_retry.mjs`, transpiling the actual
+  API function and mocking fetch/timers, passed assertions for typed 401,
+  transient GET recovery, no POST replay and no fetch after cancellation.
+  The temporary checker stays outside the committed checkout. No backend,
+  model, benchmark or native-media tests rerun for these frontend/doc changes.
+- `npm run lint` passed; `npm run build` passed (Vite **9.81 s**) using the
+  existing scoped low-memory settings. Whitespace and conflict-marker checks
+  passed. B/F review of the retry/auth combination remains requested through
+  PR #4; no browser/deployment verification or owner approval is claimed.
+
 ### Suggested coordination checklist per PR
 
 - [ ] I read `AGENTS.md`, master plan and latest relevant contracts.
@@ -1295,4 +1794,4 @@ This plan is complete as a **work specification** when roles are assigned, inter
 9. Tesseract: https://github.com/tesseract-ocr/tesseract
 10. IBM watsonx.ai Studio plans (verify Lite and runtime/generator entitlement): https://www.ibm.com/docs/en/watsonx/saas?topic=cloud-watsonxai-studio-plans
 
-**Document governance:** canonical technical design = `JENGA_CONSULTANTS_MASTER_PLAN.md`; everyday coding-agent operating instructions = `AGENTS.md`; current implementation truth = repo code/tests/logs and G0–G6 ledger, never a model's unsupported statement. Official competition instructions take priority if updated.
+**Document governance:** canonical technical design = `project-plan.md`; everyday coding-agent operating instructions = `AGENTS.md`; current implementation truth = repo code/tests/logs and G0–G6 ledger, never a model's unsupported statement. Official competition instructions take priority if updated.

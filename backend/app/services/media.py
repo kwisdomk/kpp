@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import base64
 import io
+import os
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from zipfile import BadZipFile, ZipFile
 from xml.etree import ElementTree
 
@@ -14,7 +16,10 @@ from pypdf.errors import PdfReadError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.database import MediaContentDB, MediaDB
+from app.db.database import MediaContentDB, MediaDB, ProductAccessDB, UserDB
+from app.services.authorization import authorized_products_statement
+from app.services.images import get_owned_image
+from app.services.audio import get_owned_audio
 from app.services.ai import transcribe_audio
 
 MAX_EXTRACTED_TEXT_CHARS = 40_000
@@ -60,6 +65,20 @@ def _extract_docx_text(content: bytes) -> str:
     )
 
 
+def assert_hosted_media_allowed(user_id: int, db: Session) -> None:
+    if os.getenv("ENABLE_HOSTED_MEDIA", "").lower() != "true" or os.getenv("LLM_BASE_URL", "").strip():
+        raise HTTPException(503, "Hosted attachment processing requires explicit operator approval and no selected local endpoint")
+    user = db.get(UserDB, user_id)
+    if user is None or not user.is_active or user.role not in {"customer", "engineer"}:
+        raise HTTPException(403, "Hosted attachment processing is unavailable for this account")
+    allowed_ids = authorized_products_statement(user).with_only_columns(ProductAccessDB.product_id)
+    restricted_id = db.scalar(select(ProductAccessDB.product_id).where(
+        ProductAccessDB.product_id.in_(allowed_ids), ProductAccessDB.access_level == "engineer",
+    ).limit(1))
+    if restricted_id is not None:
+        raise HTTPException(503, "Restricted catalogue context cannot use hosted attachment processing")
+
+
 def load_chat_attachments(
     media_ids: list[str],
     user_id: int,
@@ -73,21 +92,25 @@ def load_chat_attachments(
     if not media_ids:
         return []
 
-    rows = db.execute(
-        select(MediaDB, MediaContentDB)
-        .join(MediaContentDB, MediaContentDB.media_id == MediaDB.id)
-        .where(
-            MediaDB.id.in_(media_ids),
-            MediaDB.user_id == user_id,
-            MediaDB.active.is_(True),
-        )
-    ).all()
+    assert_hosted_media_allowed(user_id, db)
+    user = db.get(UserDB, user_id)
+    rows = list(db.scalars(select(MediaDB).where(
+        MediaDB.id.in_(media_ids), MediaDB.user_id == user_id, MediaDB.active.is_(True),
+    )))
     if len(rows) != len(media_ids):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="One or more attachments were not found.",
-        )
-    attachments_by_id = {media.id: (media, stored.content) for media, stored in rows}
+        raise HTTPException(404, "One or more attachments were not found")
+    attachments_by_id = {}
+    # Authorize the whole set and local file lifetimes before any provider call.
+    for media in rows:
+        stored = db.get(MediaContentDB, media.id)
+        if stored is not None:
+            if media.created_at.replace(tzinfo=timezone.utc) + timedelta(hours=24) <= datetime.now(timezone.utc):
+                raise HTTPException(410, "Attachment expired; upload it again")
+            content = stored.content
+        else:
+            _, path = (get_owned_audio if media.kind == "audio" else get_owned_image)(db, user, media.id)
+            content = path.read_bytes()
+        attachments_by_id[media.id] = (media, content)
 
     attachments: list[ChatAttachment] = []
     for media_id in media_ids:

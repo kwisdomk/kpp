@@ -14,12 +14,12 @@ Create a Vercel project connected to this GitHub repository and configure:
 - Build command: `npm run build`
 - Output directory: `dist`
 
-`vercel.json` sends `/api/v1/*` requests to
-`https://kpp.primecloud.cloud/api/v1/*` before applying the SPA fallback. The
-browser therefore calls a same-origin API path and does not need
-`VITE_API_BASE_URL`. Update the rewrite destination if the backend domain
-changes. Never put database or AI-provider secrets in `VITE_*` variables
-because they are embedded in browser assets.
+`vercel.json` sends `/api/v1/*` to
+`https://kpp.primecloud.cloud/api/v1/*` before the SPA fallback. Production builds
+always use the same-origin `/api/v1` path. Update the rewrite destination if the
+backend domain changes; redeploy after changing routing. `VITE_API_BASE_URL`
+remains a development-only override. Never put database or AI-provider secrets
+in `VITE_*` variables because they are embedded in browser assets.
 
 ## PrimeCloud backend
 
@@ -64,7 +64,41 @@ Alternatively, the backend supports the documented `MYSQL_HOST`, `MYSQL_PORT`,
 `MYSQL_USER`, `MYSQL_PASSWORD`, and `MYSQL_DATABASE` variables. Keep database
 credentials, `JENGA_SECRET_KEY`, and `OPENAI_API_KEY` only in PrimeCloud's
 secret manager. `OPENAI_API_KEY` is optional for text fallback and required
-for configured hosted AI and attachment/transcription features.
+for configured hosted AI. Hosted attachment/transcription also requires the
+explicit operator setting and per-request consent described below.
+
+## Local inference and media selection
+
+For a backend running on Athena, set `LLM_BASE_URL=http://127.0.0.1:1234/v1`
+and `LLM_MODEL` to the exact served model ID. Local text requests use that
+endpoint exclusively; failures do not fall back to a hosted provider. A remote
+PrimeCloud backend cannot reach Athena through its own loopback address.
+
+Photo and voice processing default to the local adapters. Configure a verified
+Tesseract executable through `TESSERACT_CMD` and whisper.cpp through
+`WHISPER_CPP_CMD` and `WHISPER_MODEL_PATH`. Install these native dependencies
+separately; installing Python requirements does not install them or model weights.
+Browser audio is converted to bounded PCM16 mono 16 kHz WAV for the local route.
+Set `MEDIA_STORAGE_DIR` to a private persistent directory; leave it unset to use
+the repository-local `data/uploads` development default. Do not set it to an
+empty value or a public/static directory. Native speech and browser recording
+remain subject to runtime verification; approved manual retrieval is unfinished.
+
+The upstream hosted document/image/speech path is retained as an optional
+profile. It requires all of: `ENABLE_HOSTED_MEDIA=true`, no selected
+`LLM_BASE_URL`, an appropriately configured provider, operator approval for the
+data and provider, and `allow_external_processing=true` in the request. The UI
+checkbox supplies consent only; it cannot enable the server profile or grant
+access. Restricted catalogue context is rejected before hosted media loading or
+transcription. Uploaded content remains untrusted, unverified user material.
+
+The default profile rejects document uploads and compressed audio codecs. When
+the optional hosted profile is enabled, its document and compressed-audio bytes
+are stored in the owner-bound database table and removed after successful hosted
+processing or explicit removal. Sanitized local images/WAV are stored privately
+on disk, with a 60-minute read/inference lifetime and explicit removal. Automatic
+disk reclamation remains incomplete. Neither profile approves manufacturer
+documents, licenses, technical facts, held-out metrics or provider entitlement.
 
 ## Deploy order and existing PrimeCloud services
 

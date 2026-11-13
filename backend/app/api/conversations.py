@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth.security import get_current_user
-from app.db.database import ConversationDB, ConversationMessageDB, UserDB, get_db
+from app.db.database import AuditLogDB, ConversationDB, ConversationMessageDB, UserDB, get_db
 from app.schemas.catalogue import ConversationCreate
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -86,6 +86,17 @@ def list_conversation_messages(
     db: Annotated[Session, Depends(get_db)],
 ) -> list[dict[str, object]]:
     _owner_or_404(conversation_id, current_user, db)
+    if current_user.role == "customer":
+        # A demoted account must not recover prior engineer answers from history.
+        # Inspect only server-written audit IDs/roles before selecting message text.
+        has_customer_audit = db.scalar(select(AuditLogDB.id).where(
+            AuditLogDB.session_id == conversation_id, AuditLogDB.user_role == "customer",
+        ).limit(1))
+        has_other_role_audit = db.scalar(select(AuditLogDB.id).where(
+            AuditLogDB.session_id == conversation_id, AuditLogDB.user_role != "customer",
+        ).limit(1))
+        if has_customer_audit is None or has_other_role_audit is not None:
+            return []
     messages = db.scalars(
         select(ConversationMessageDB)
         .where(ConversationMessageDB.conversation_id == conversation_id)
